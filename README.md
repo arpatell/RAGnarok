@@ -130,21 +130,6 @@ Data sources:
 - Pinecone for hybrid vector retrieval.
 - Public manga chapter pages for reader panel extraction.
 
-## Theoretical Applications
-
-RAGnarok’s architecture is useful beyond manga/anime search.
-
-The same approach can support:
-
-- Media discovery from vague memory.
-- Character-aware search for games, books, comics, or film.
-- Customer support retrieval where exact keyword matches are insufficient.
-- Legal or medical document triage where user phrasing differs from source terminology.
-- Product catalogs with aliases, nicknames, specs, and subjective descriptions.
-- Research assistants that need hybrid retrieval plus final LLM judgment.
-
-The key pattern is separating candidate retrieval from final judgment. Retrieval maximizes recall; reranking reasons over intent, ambiguity, and evidence.
-
 ## Repository Layout
 
 - `apps/frontend` contains the React reader and discovery UI.
