@@ -1,0 +1,30 @@
+node_modules/
+dist/
+.vite/
+.cache/
+.tmp/
+.uv-cache/
+.env
+**/.env
+**/.env.local
+**/.env.development
+**/.env.production
+*.log
+__ddg_test.mts
+_mk_debug.html
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.vercel/
+DEPLOYMENT.md
+
+# Generated RAG data/results. Keep these locally; do not push to GitHub.
+rag/ingestion/*
+rag/eval/*.json
+rag/eval/*.log
+!rag/ingestion/.gitkeep
+!rag/ingestion/README.md
+
+# Local deployment notes
+DEPLOYMENT.md

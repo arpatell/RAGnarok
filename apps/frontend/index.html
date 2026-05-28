@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAGnarok Reader 🌀 | AI Manga & Anime Discovery + Universal Manga Reader</title>
+    <meta
+      name="description"
+      content="RAGnarok Reader is an AI-powered manga and anime discovery app with hybrid semantic + keyword search, character-aware matching, and a universal chapter reader."
+    />
+    <meta
+      name="keywords"
+      content="manga reader, manhwa reader, anime discovery, ai manga search, character search anime, hybrid search, semantic search manga, rag manga app, universal manga reader"
+    />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+    <meta name="theme-color" content="#081218" />
+    <meta name="application-name" content="RAGnarok Reader" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" id="canonical-link" href="/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="RAGnarok Reader 🌀" />
+    <meta
+      property="og:description"
+      content="Discover manga and anime by plot, character, or title, then open chapters in a universal reader."
+    />
+    <meta property="og:site_name" content="RAGnarok Reader" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="RAGnarok Reader 🌀" />
+    <meta
+      name="twitter:description"
+      content="AI-powered manga and anime discovery with semantic + keyword retrieval and a universal chapter reader."
+    />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "RAGnarok Reader",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web Browser",
+        "description": "AI-powered manga and anime discovery plus a universal manga chapter reader.",
+        "featureList": [
+          "Hybrid semantic and keyword retrieval",
+          "Character-aware search using Jikan metadata",
+          "Title-first exact matching for anime and manga",
+          "Universal chapter reader with paginated and scroll modes",
+          "Metadata enrichment for type labels and images"
+        ]
+      }
+    </script>
+    <script>
+      (function () {
+        var canonical = document.getElementById("canonical-link");
+        if (canonical && window.location && window.location.origin) {
+          canonical.href = window.location.origin + window.location.pathname;
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

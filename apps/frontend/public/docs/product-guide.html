@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAGnarok Reader Product Guide | AI Manga & Anime Discovery</title>
+    <meta
+      name="description"
+      content="Complete product guide for RAGnarok Reader: AI manga and anime discovery, character-aware search, title matching, and universal manga chapter reading."
+    />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+    <style>
+      :root {
+        --bg: #081218;
+        --surface: #0f1d27;
+        --line: #2c465a;
+        --text: #f4efe2;
+        --muted: #b9c2c5;
+        --accent: #f2a13c;
+        --accent2: #5cd2b1;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 12% 12%, rgba(92, 210, 177, 0.16), transparent 34%),
+          radial-gradient(circle at 85% 18%, rgba(242, 161, 60, 0.16), transparent 34%),
+          var(--bg);
+      }
+
+      .wrap {
+        width: min(980px, 92vw);
+        margin: 0 auto;
+        padding: 2.5rem 0 4rem;
+      }
+
+      .hero {
+        border: 1px solid rgba(92, 210, 177, 0.3);
+        background: rgba(15, 29, 39, 0.86);
+        border-radius: 14px;
+        padding: 1.2rem;
+      }
+
+      .kicker {
+        color: var(--accent2);
+        font-size: 0.82rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0.35rem 0 0.5rem;
+        font-size: clamp(1.8rem, 4vw, 2.8rem);
+      }
+
+      .lead {
+        color: var(--muted);
+        line-height: 1.6;
+        max-width: 72ch;
+      }
+
+      .actions {
+        margin-top: 0.85rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        border-radius: 999px;
+        border: 1px solid rgba(92, 210, 177, 0.36);
+        padding: 0.5rem 0.8rem;
+        color: var(--text);
+      }
+
+      .btn.primary {
+        border-color: rgba(242, 161, 60, 0.45);
+        background: rgba(242, 161, 60, 0.15);
+      }
+
+      section {
+        margin-top: 1rem;
+        border: 1px solid rgba(92, 210, 177, 0.22);
+        background: rgba(15, 29, 39, 0.84);
+        border-radius: 14px;
+        padding: 1rem;
+      }
+
+      h2 {
+        margin-top: 0;
+        font-size: 1.15rem;
+      }
+
+      p, li {
+        color: #d6e3e6;
+        line-height: 1.65;
+      }
+
+      ul {
+        margin: 0.5rem 0 0;
+        padding-left: 1.15rem;
+      }
+
+      .note {
+        border-left: 3px solid var(--accent);
+        padding-left: 0.65rem;
+        color: #ffe2b8;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hero">
+        <div class="kicker">RAGnarok Reader 🌀</div>
+        <h1>Product Guide: AI Manga & Anime Discovery + Universal Manga Reader</h1>
+        <p class="lead">
+          RAGnarok Reader helps you discover anime and manga when you only remember partial details: a plot idea, a
+          character name, an ability, or a specific title. It combines retrieval-augmented generation (RAG), hybrid
+          semantic + keyword search, and a universal chapter reader so you can go from uncertain memory to reading in
+          seconds.
+        </p>
+        <div class="actions">
+          <a class="btn primary" href="/">Open RAGnarok Reader</a>
+        </div>
+      </header>
+
+      <section>
+        <h2>What RAGnarok Reader Solves</h2>
+        <p>
+          Most manga and anime search tools fail when users search naturally. People usually do not type perfect
+          titles. They ask with memory fragments like “guy finds notebook that can kill people,” “sorcerer with blue
+          eyes,” or “assassin falls in love with the girl he was hired to kill.” RAGnarok Reader is built for those
+          real queries, not just exact title lookups.
+        </p>
+        <ul>
+          <li>Supports vague plot descriptions with semantic retrieval.</li>
+          <li>Supports exact character and title queries with keyword precision.</li>
+          <li>Supports ambiguous intent and surfaces close contenders with rationale.</li>
+          <li>Lets readers paste direct chapter URLs from many public manga sources.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>How Search Works for Users</h2>
+        <p>
+          The Smart Search flow is intentionally simple. You type a phrase, press Search, and receive ranked matches
+          with synopsis, type labels, genres, and a plain-language “Why this matches” explanation.
+        </p>
+        <ul>
+          <li><strong>Plot-first query:</strong> Describe a story beat, conflict, world, or vibe.</li>
+          <li><strong>Character-first query:</strong> Type one or more character names or aliases.</li>
+          <li><strong>Title-first query:</strong> Type English or romaji titles for exact and near-exact matching.</li>
+          <li><strong>Action-first workflow:</strong> Use “Read Now” to jump into chapter discovery and reading.</li>
+        </ul>
+        <p class="note">
+          Smart Search is not hardcoded to specific franchises. It is retrieval-based and model-judged, so results
+          improve as retrieval quality and metadata coverage improve.
+        </p>
+      </section>
+
+      <section>
+        <h2>Core Product Features</h2>
+        <ul>
+          <li><strong>Hybrid Discovery:</strong> Semantic vectors + sparse keyword signals for balanced recall and precision.</li>
+          <li><strong>Character-Aware Matching:</strong> Character aliases and metadata improve people-name queries.</li>
+          <li><strong>Title Intent Handling:</strong> Exact and near-title queries prioritize direct title matches.</li>
+          <li><strong>Live Metadata Enrichment:</strong> Result cards update type labels, scores, status, and images.</li>
+          <li><strong>Universal Reader Modes:</strong> Paginated mode for manga and continuous mode for manhwa/webtoon-style flow.</li>
+          <li><strong>Library Persistence:</strong> Recents, favorites, and reading continuity for long-term sessions.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Who This Is For</h2>
+        <ul>
+          <li><strong>Anime and manga fans</strong> who remember details but not exact titles.</li>
+          <li><strong>Returning readers</strong> trying to relocate a dropped series quickly.</li>
+          <li><strong>Content curators</strong> who want plot-based discovery and comparison.</li>
+          <li><strong>Technical users</strong> who care about transparent ranking rationale and citations.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Search Quality Philosophy</h2>
+        <p>
+          RAGnarok Reader is built around a strict retrieval-first philosophy. It does not rely on brittle, one-off,
+          hardcoded query hacks. The ranking layer evaluates retrieved candidates and reasons over evidence from
+          synopsis, character metadata, and title signals. This keeps behavior scalable across new titles and edge
+          cases instead of overfitting to a small set of manually patched examples.
+        </p>
+      </section>
+
+      <section>
+        <h2>Practical Query Tips</h2>
+        <ul>
+          <li>Include one unique clue: a named ability, character surname, or unusual setting term.</li>
+          <li>For uncertain spelling, try a second query with alternate romanization.</li>
+          <li>For exact title intent, include the clean title only without extra story text.</li>
+          <li>For character queries, add one co-character if the name is common across franchises.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Reader & Import Coverage</h2>
+        <p>
+          Automated reading is tuned for strong title-to-chapter resolution where supported. Manual URL import remains
+          available for users who want direct control and can work across many public panel-based chapter pages.
+        </p>
+      </section>
+
+    </main>
+  </body>
+</html>
