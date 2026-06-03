@@ -1131,34 +1131,5 @@ export async function extractChapterData(options: {
       navigation: inferAdjacentChapterUrls(options.chapterUrl)
     })
   };
-  const aiContext = buildAIContext(options.html, options.chapterUrl, heuristic);
-  const shouldUseAI =
-    options.adapter?.id !== "mangakatana" ||
-    heuristicWithNavigation.chapter.panelCandidates.length < 2 ||
-    heuristicWithNavigation.chapterList.length < 2;
-
-  if (!shouldUseAI) {
-    return heuristicWithNavigation;
-  }
-
-  const aiExtraction = await requestAIExtraction(aiContext);
-
-  if (!aiExtraction.ok) {
-    const sourcePrefix = aiExtraction.source ?? "ai";
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[ai-extractor] fallback source=${sourcePrefix} reason=${aiExtraction.failure.reason} status=${aiExtraction.failure.status ?? "n/a"} url=${options.chapterUrl}`
-    );
-    return {
-      ...heuristicWithNavigation,
-      source: `${sourcePrefix}-failed-heuristic`
-    };
-  }
-
-  return mergeAIAndHeuristic(
-    aiExtraction.output,
-    heuristicWithNavigation,
-    options.chapterUrl,
-    aiExtraction.source
-  );
+  return heuristicWithNavigation;
 }

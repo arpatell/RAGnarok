@@ -194,7 +194,7 @@ export function createDefaultSettings(): ReaderSettings {
     enableSwipeGestures: true,
     pinVerticalPageSelector: false,
     browserHistoryBehavior: "title-only",
-    transitionStyle: "fade",
+    transitionStyle: "none",
     saveProgress: true,
     zoomPercent: 100,
     highContrast: false
@@ -213,6 +213,7 @@ export interface SearchResult {
 
 export interface RagSearchResult {
   title: string;
+  title_candidates?: string[];
   media_type: string;
   display_type: string | null;
   mal_id: number | null;
@@ -248,6 +249,7 @@ export interface RagResultLiveMetaPayload {
   media_type: string;
   display_type: string | null;
   title: string;
+  title_candidates: string[];
   image_url: string | null;
   status: string | null;
   chapters: number | null;

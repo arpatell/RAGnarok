@@ -100,7 +100,8 @@ const CATALOG: CatalogSeries[] = [
 ];
 
 const SUPPORTED_ADAPTER_IDS = new Set<string>([
-  "mangakatana",
+  "weebcentral",
+  "manhwazone",
   "mangadex",
   "webtoons",
   "mangasee",

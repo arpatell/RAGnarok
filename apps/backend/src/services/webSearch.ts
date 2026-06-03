@@ -3,8 +3,6 @@ import { resolveAdapterForUrl } from "../adapters/index.js";
 import { sortChapterList } from "./chapterSort.js";
 import { fetchChapterHtml } from "./fetchProxy.js";
 
-const DDG_SEARCH_URL = "https://html.duckduckgo.com/html/";
-const DDG_TIMEOUT_MS = 12_000;
 const MAX_CANDIDATE_URLS = 12;
 const MAX_RESULTS = 6;
 const SEARCH_CONCURRENCY = 3;
@@ -81,10 +79,52 @@ export interface ReadNowResolution {
   sourceDomain: string;
 }
 
-const MANGAKATANA_BASE_URL = "https://mangakatana.com";
-const MANGAKATANA_SEARCH_TIMEOUT_MS = 12_000;
-const MANGAKATANA_SEARCH_LIMIT = 8;
-const MANGAKATANA_DOMAIN = "mangakatana.com";
+interface SourceReadNowMatch {
+  queryTitle: string;
+  candidate: SourceSeriesCandidate;
+  score: number;
+}
+
+const WEEBCENTRAL_BASE_URL = "https://weebcentral.com";
+const WEEBCENTRAL_DOMAIN = "weebcentral.com";
+const WEEBCENTRAL_SEARCH_TIMEOUT_MS = 12_000;
+const WEEBCENTRAL_SEARCH_LIMIT = 24;
+const MANHWAZONE_BASE_URL = "https://manhwazone.com";
+const MANHWAZONE_DOMAIN = "manhwazone.com";
+const MANHWAZONE_SEARCH_TIMEOUT_MS = 12_000;
+const MANHWAZONE_SEARCH_LIMIT = 24;
+const MIN_READ_NOW_TITLE_SCORE = 0.58;
+
+interface SourceSeriesCandidate {
+  url: string;
+  title: string;
+  firstChapterUrl?: string;
+}
+
+export interface ReadNowResolveOptions {
+  preferManhwa?: boolean;
+}
+
+function isLatinReadableTitle(value: string): boolean {
+  const cleaned = cleanTitle(value);
+  if (!cleaned || cleaned.length < 2) {
+    return false;
+  }
+
+  if (/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0600-\u06ff]/.test(cleaned)) {
+    return false;
+  }
+
+  return /[a-zA-Z]/.test(cleaned);
+}
+
+function normalizeSeriesSlug(slug: string): string {
+  return slug
+    .replace(/\.\d+$/, "")
+    .replace(/[-_][a-z0-9]{4,10}$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+}
 
 function normalizeTitle(value: string): string {
   return value
@@ -94,26 +134,71 @@ function normalizeTitle(value: string): string {
     .trim();
 }
 
-function tokenizeTitle(value: string): string[] {
+function parseChapterNumber(value: string | null | undefined): number | null {
+  const match = (value ?? "").match(/-?\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isChapterOneLabel(value: string | null | undefined): boolean {
+  return /\b(?:chapter|ch\.?|episode|ep\.?)\s*0*1(?:\.0+)?\b/i.test(value ?? "");
+}
+
+function chooseChapterOne(chapterList: Array<{ number: string; title: string | null; url: string; special?: boolean }>) {
+  return (
+    chapterList.find((chapter) => isChapterOneLabel(chapter.title) || isChapterOneLabel(chapter.number)) ??
+    chapterList.find((chapter) => {
+      const parsed = parseChapterNumber(chapter.number || chapter.title);
+      return parsed === 1 && chapter.special !== true;
+    }) ??
+    chapterList.find((chapter) => chapter.special !== true) ??
+    chapterList[0] ??
+    null
+  );
+}
+
+const TITLE_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "at",
+  "by",
+  "for",
+  "from",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "the",
+  "to",
+  "who",
+  "with"
+]);
+
+function tokenizeTitle(value: string, includeStopwords = false): string[] {
   return normalizeTitle(value)
     .split(" ")
     .map((token) => token.trim())
-    .filter((token) => token.length >= 2);
+    .filter((token) => token.length >= 2)
+    .filter((token) => includeStopwords || !TITLE_STOPWORDS.has(token));
 }
 
 function seriesNameFromSeriesUrl(seriesUrl: string): string {
   try {
     const parsed = new URL(seriesUrl);
     const segments = parsed.pathname.split("/").filter(Boolean);
-    const slug = segments[1] ?? "";
+    const slug = segments[1] ?? segments[0] ?? "";
     if (!slug) {
       return "";
     }
 
-    return slug
-      .replace(/\.\d+$/, "")
-      .replace(/[-_]+/g, " ")
-      .trim();
+    return normalizeSeriesSlug(slug);
   } catch {
     return "";
   }
@@ -143,32 +228,111 @@ function titleSimilarityScore(queryTitle: string, candidateTitle: string): numbe
       intersectionCount += 1;
     }
   }
-  const precision = intersectionCount / querySet.size;
-  const recall = intersectionCount / candidateSet.size;
-  const base = (precision * 0.65) + (recall * 0.35);
+
+  const queryCoverage = intersectionCount / querySet.size;
+  const candidateCoverage = intersectionCount / candidateSet.size;
+  const dice = (2 * intersectionCount) / (querySet.size + candidateSet.size);
+  let score = Math.max(dice, (queryCoverage * 0.7) + (candidateCoverage * 0.3));
 
   if (candidateNorm.includes(queryNorm) || queryNorm.includes(candidateNorm)) {
-    return Math.min(1, base + 0.12);
+    score = Math.max(score, 0.82);
   }
-  return base;
+
+  // Loose title matching should tolerate subtitles and scan-site suffixes, but not unrelated first results.
+  if (queryCoverage === 1 && querySet.size >= 2) {
+    score = Math.max(score, 0.74);
+  }
+
+  const queryPhrase = queryTokens.join(" ");
+  const candidatePhrase = candidateTokens.join(" ");
+  if (queryPhrase.length >= 8 && candidatePhrase.includes(queryPhrase)) {
+    score = 1;
+  } else if (candidatePhrase.length >= 8 && queryPhrase.includes(candidatePhrase)) {
+    score = Math.max(score, 0.86);
+  }
+
+  if (intersectionCount >= 3 && querySet.size >= 3) {
+    score = Math.max(score, 0.68);
+  }
+
+  if (intersectionCount >= 2 && querySet.size >= 3 && candidateSet.size >= 2) {
+    score = Math.max(score, 0.62);
+  }
+
+  return Math.min(1, score);
 }
 
-function isMangaKatanaHost(url: string): boolean {
+function isWeebCentralHost(url: string): boolean {
   const domain = extractDomain(url);
-  return domain === MANGAKATANA_DOMAIN || domain.endsWith(`.${MANGAKATANA_DOMAIN}`);
+  return domain === WEEBCENTRAL_DOMAIN || domain.endsWith(`.${WEEBCENTRAL_DOMAIN}`);
 }
 
-function isMangaKatanaSeriesUrl(url: string): boolean {
+function isWeebCentralSeriesUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    if (!isMangaKatanaHost(parsed.toString())) {
+    if (!isWeebCentralHost(parsed.toString())) {
       return false;
     }
+
     const segments = parsed.pathname.split("/").filter(Boolean);
-    if (segments.length !== 2) {
+    return segments[0] === "series" && Boolean(segments[1]);
+  } catch {
+    return false;
+  }
+}
+
+function isWeebCentralChapterUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (!isWeebCentralHost(parsed.toString())) {
       return false;
     }
-    return segments[0] === "manga" && !segments[1]?.startsWith("page");
+
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    return segments[0] === "chapters" && Boolean(segments[1]);
+  } catch {
+    return false;
+  }
+}
+
+function isManhwaZoneHost(url: string): boolean {
+  const domain = extractDomain(url);
+  return domain === MANHWAZONE_DOMAIN || domain.endsWith(`.${MANHWAZONE_DOMAIN}`);
+}
+
+function isManhwaZonePreviewUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return isManhwaZoneHost(parsed.toString()) && parsed.pathname.startsWith("/preview/");
+  } catch {
+    return false;
+  }
+}
+
+function isManhwaZoneSeriesUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (!isManhwaZoneHost(parsed.toString()) || isManhwaZonePreviewUrl(parsed.toString())) {
+      return false;
+    }
+
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const first = segments[0]?.toLowerCase() ?? "";
+    if (segments.length === 0 || first === "search") {
+      return false;
+    }
+
+    return ![
+      "account",
+      "auth",
+      "cdn-cgi",
+      "contact",
+      "dmca",
+      "login",
+      "privacy",
+      "register",
+      "terms"
+    ].includes(first);
   } catch {
     return false;
   }
@@ -188,220 +352,565 @@ function dedupeUrls(urls: string[]): string[] {
   return deduped;
 }
 
-async function fetchMangaKatanaSearchSeriesUrls(title: string): Promise<string[]> {
-  const encoded = encodeURIComponent(title);
-  const urlsToTry = [
-    `${MANGAKATANA_BASE_URL}/?search=${encoded}&search_by=book_name`,
-    `${MANGAKATANA_BASE_URL}/?search=${encoded}`,
-    `${MANGAKATANA_BASE_URL}/?s=${encoded}`
+function cleanCandidateText(value: string | undefined | null): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function extractAnchorCandidateTitle(anchor: cheerio.Cheerio<any>): string {
+  const textLines = (anchor.text() ?? "")
+    .split(/\r?\n/)
+    .map((line) => cleanCandidateText(line))
+    .filter(Boolean);
+
+  const values = [
+    anchor.attr("title"),
+    anchor.attr("aria-label"),
+    anchor.find("img").first().attr("alt"),
+    anchor.find("h1,h2,h3,h4,.truncate,.line-clamp-1,.line-clamp-2,[class*='title']").first().text(),
+    ...textLines,
+    anchor.text()
   ];
 
-  for (const url of urlsToTry) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": BROWSER_UA,
-          Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9"
-        },
-        signal: AbortSignal.timeout(MANGAKATANA_SEARCH_TIMEOUT_MS)
-      });
-      if (!response.ok) {
-        continue;
-      }
-
-      const html = await response.text();
-      const $ = cheerio.load(html);
-      const links: string[] = [];
-      $("a[href]").each((_, el) => {
-        const href = $(el).attr("href") ?? "";
-        const resolved = resolveUrl(MANGAKATANA_BASE_URL, href);
-        if (!isMangaKatanaSeriesUrl(resolved)) {
-          return;
-        }
-        links.push(resolved);
-      });
-
-      const deduped = dedupeUrls(links);
-      if (deduped.length > 0) {
-        return deduped.slice(0, MANGAKATANA_SEARCH_LIMIT);
-      }
-    } catch {
-      // Try next search URL shape.
+  for (const value of values) {
+    const cleaned = cleanCandidateText(value);
+    if (cleaned && cleaned.length <= 180) {
+      return cleanTitle(cleaned);
     }
   }
 
-  return [];
+  return "";
 }
 
-async function fetchMangaKatanaSeriesCandidatesViaDdg(title: string): Promise<string[]> {
-  const queries = [
-    `site:mangakatana.com/manga "${title}"`,
-    `${title} site:mangakatana.com/manga`
+function buildWeebCentralSearchUrl(title: string): string {
+  const query = new URLSearchParams({ text: title }).toString().replace(/^text=/, "");
+  return `${WEEBCENTRAL_BASE_URL}/search/data?text=${query}&sort=Best+Match&order=Descending&official=Any&anime=Any&adult=Any&display_mode=Full+Display`;
+}
+
+function extractWeebCentralCandidateTitle(anchor: cheerio.Cheerio<any>, seriesUrl: string): string {
+  const titleCandidates = [
+    anchor.attr("title"),
+    anchor.attr("aria-label"),
+    anchor.find("img").first().attr("alt"),
+    anchor.find("h1,h2,h3,h4,[class*='title'],[class*='font']").first().text(),
+    anchor.text()
   ];
-  for (const query of queries) {
-    const urls = await fetchDuckDuckGoUrls(query);
-    const deduped = dedupeUrls(urls.filter(isMangaKatanaSeriesUrl));
-    if (deduped.length > 0) {
-      return deduped.slice(0, MANGAKATANA_SEARCH_LIMIT);
+
+  const container = anchor.closest("article,li,section,div").first();
+  if (container.length > 0) {
+    titleCandidates.push(
+      container.find("h1,h2,h3,h4,[class*='title'],[class*='font']").first().text(),
+      container.find("img").first().attr("alt"),
+      container.text()
+    );
+  }
+
+  for (const value of titleCandidates) {
+    const cleaned = cleanTitle(cleanCandidateText(value));
+    if (cleaned && cleaned.length <= 180 && !/^(official|subscribe|show details)$/i.test(cleaned)) {
+      return cleaned;
     }
   }
-  return [];
+
+  return seriesNameFromSeriesUrl(seriesUrl);
 }
 
-async function resolveFirstChapterFromSeriesUrl(seriesUrl: string): Promise<{ chapterUrl: string; matchedTitle: string } | null> {
-  const fetched = await fetchChapterHtml(seriesUrl);
-  if (fetched.status >= 400 || !fetched.html) {
-    return null;
-  }
+async function fetchWeebCentralSearchSeriesCandidates(title: string): Promise<SourceSeriesCandidate[]> {
+  const searchUrl = buildWeebCentralSearchUrl(title);
 
-  const adapter = resolveAdapterForUrl(seriesUrl);
-  if (!adapter) {
-    return null;
-  }
-  const parsed = adapter.parse(fetched.html, seriesUrl);
-  const chapterList = sortChapterList(parsed.chapterList);
-  if (chapterList.length === 0) {
-    return null;
-  }
-
-  const firstNumeric = chapterList.find((chapter) => chapter.special !== true) ?? chapterList[0];
-  if (!firstNumeric?.url) {
-    return null;
-  }
-
-  const matchedTitle = cleanTitle(parsed.series.title || seriesNameFromSeriesUrl(seriesUrl) || "Unknown Series");
-  return {
-    chapterUrl: firstNumeric.url,
-    matchedTitle
-  };
-}
-
-function scoreSeriesCandidate(queryTitle: string, seriesUrl: string): number {
-  const urlTitle = seriesNameFromSeriesUrl(seriesUrl);
-  return titleSimilarityScore(queryTitle, urlTitle);
-}
-
-function chooseBestSeriesUrl(queryTitle: string, seriesUrls: string[]): string | null {
-  const scored = seriesUrls
-    .map((url) => ({ url, score: scoreSeriesCandidate(queryTitle, url) }))
-    .sort((a, b) => b.score - a.score);
-  return scored[0]?.url ?? null;
-}
-
-export async function resolveMangaKatanaReadNow(title: string): Promise<ReadNowResolution | null> {
-  const requestedTitle = cleanTitle(title);
-  if (!requestedTitle) {
-    return null;
-  }
-
-  let seriesCandidates = await fetchMangaKatanaSearchSeriesUrls(requestedTitle);
-  if (seriesCandidates.length === 0) {
-    seriesCandidates = await fetchMangaKatanaSeriesCandidatesViaDdg(requestedTitle);
-  }
-  if (seriesCandidates.length === 0) {
-    return null;
-  }
-
-  const selectedSeriesUrl = chooseBestSeriesUrl(requestedTitle, seriesCandidates);
-  if (!selectedSeriesUrl) {
-    return null;
-  }
-
-  const resolved = await resolveFirstChapterFromSeriesUrl(selectedSeriesUrl);
-  if (!resolved) {
-    return null;
-  }
-
-  return {
-    requestedTitle,
-    matchedTitle: resolved.matchedTitle,
-    seriesUrl: selectedSeriesUrl,
-    chapterUrl: resolved.chapterUrl,
-    sourceDomain: extractDomain(resolved.chapterUrl)
-  };
-}
-
-async function fetchDuckDuckGoUrls(query: string): Promise<string[]> {
-  const params = new URLSearchParams({ q: query, b: "", kl: "us-en" });
-
-  let html: string;
   try {
-    const response = await fetch(DDG_SEARCH_URL, {
-      method: "POST",
+    const response = await fetch(searchUrl, {
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": BROWSER_UA,
         Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9"
       },
-      body: params.toString(),
-      signal: AbortSignal.timeout(DDG_TIMEOUT_MS)
+      signal: AbortSignal.timeout(WEEBCENTRAL_SEARCH_TIMEOUT_MS)
     });
 
     // eslint-disable-next-line no-console
-    console.log(`[search] ddg status=${response.status} ok=${response.ok} query="${query.substring(0, 60)}"`);
+    console.log(`[read-now] weebcentral status=${response.status} ok=${response.ok} query="${title.substring(0, 60)}"`);
 
     if (!response.ok) {
       return [];
     }
 
-    html = await response.text();
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const candidates = new Map<string, SourceSeriesCandidate>();
+
+    $("a[href]").each((_, el) => {
+      const anchor = $(el);
+      const resolved = resolveUrl(WEEBCENTRAL_BASE_URL, anchor.attr("href") ?? "");
+      if (!isWeebCentralSeriesUrl(resolved)) {
+        return;
+      }
+
+      const candidateTitle = extractWeebCentralCandidateTitle(anchor, resolved);
+      if (!candidateTitle) {
+        return;
+      }
+
+      const existing = candidates.get(resolved);
+      if (!existing || candidateTitle.length > existing.title.length) {
+        candidates.set(resolved, { url: resolved, title: candidateTitle });
+      }
+    });
+
+    const sorted = Array.from(candidates.values())
+      .sort((a, b) => {
+        const scoreA = scoreSourceCandidate(title, a);
+        const scoreB = scoreSourceCandidate(title, b);
+        return scoreB - scoreA;
+      })
+      .slice(0, WEEBCENTRAL_SEARCH_LIMIT);
+
+    // eslint-disable-next-line no-console
+    console.log(`[read-now] weebcentral candidates=${sorted.length} query="${title.substring(0, 60)}"`);
+
+    return sorted;
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error(`[search] ddg fetch error: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[read-now] weebcentral fetch error query="${title.substring(0, 60)}": ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
-
-  const $ = cheerio.load(html);
-  const urls: string[] = [];
-
-  $("a.result__a").each((_, el) => {
-    const href = $(el).attr("href") ?? "";
-    if (href.startsWith("http")) {
-      urls.push(href);
-    }
-  });
-
-  // eslint-disable-next-line no-console
-  console.log(`[search] ddg extracted ${urls.length} urls`);
-
-  return urls;
 }
 
-async function fetchMangaBuddyUrls(query: string): Promise<string[]> {
-  const apiUrl = `https://mangabuddy.com/api/manga/search?q=${encodeURIComponent(query)}&limit=8`;
-  let html: string;
-  try {
-    const response = await fetch(apiUrl, {
-      headers: { "User-Agent": BROWSER_UA, Accept: "text/html" },
-      signal: AbortSignal.timeout(12_000)
-    });
-    if (!response.ok) return [];
-    html = await response.text();
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[search] mangabuddy fetch error: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+function isGenericManhwaZoneLabel(value: string): boolean {
+  const normalized = normalizeTitle(value);
+  return normalized === "manhwa" || normalized === "manhua" || normalized === "manga" || normalized === "read";
+}
+
+function upsertManhwaZoneCandidate(
+  candidates: Map<string, SourceSeriesCandidate>,
+  seriesUrl: string,
+  title: string,
+  firstChapterUrl?: string
+): void {
+  const candidateTitle = cleanTitle(title) || seriesNameFromSeriesUrl(seriesUrl);
+  if (!candidateTitle) {
+    return;
   }
 
-  const $ = cheerio.load(html);
-  const seriesUrls: string[] = [];
+  const existing = candidates.get(seriesUrl);
+  candidates.set(seriesUrl, {
+    url: seriesUrl,
+    title: existing && existing.title.length > candidateTitle.length ? existing.title : candidateTitle,
+    firstChapterUrl: firstChapterUrl ?? existing?.firstChapterUrl
+  });
+}
 
-  $("a[title][href]").each((_, el) => {
-    const href = $(el).attr("href") ?? "";
-    // Series slugs are single-segment paths like /solo-leveling (no nested slashes, no chapter keyword)
-    if (!href.startsWith("/") || href.slice(1).includes("/") || href.includes("chapter") || href.length < 4) {
+async function fetchManhwaZoneSearchSeriesCandidates(title: string): Promise<SourceSeriesCandidate[]> {
+  const searchUrl = `${MANHWAZONE_BASE_URL}/search?keyword=${encodeURIComponent(title)}`;
+
+  try {
+    const response = await fetch(searchUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
+      },
+      signal: AbortSignal.timeout(MANHWAZONE_SEARCH_TIMEOUT_MS)
+    });
+
+    // eslint-disable-next-line no-console
+    console.log(`[read-now] manhwazone status=${response.status} ok=${response.ok} query="${title.substring(0, 60)}"`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    const candidates = new Map<string, SourceSeriesCandidate>();
+
+    $("a[href]").each((_, el) => {
+      const anchor = $(el);
+      const href = anchor.attr("href") ?? "";
+      const resolved = resolveUrl(MANHWAZONE_BASE_URL, href);
+      if (!isManhwaZonePreviewUrl(resolved)) {
+        return;
+      }
+
+      const container = anchor.parent().parent();
+      container.find("a[href*='/series/']").each((__, seriesEl) => {
+        const seriesAnchor = $(seriesEl);
+        const seriesHref = seriesAnchor.attr("href") ?? "";
+        const seriesUrl = resolveUrl(MANHWAZONE_BASE_URL, seriesHref);
+        if (!isManhwaZoneSeriesUrl(seriesUrl)) {
+          return;
+        }
+
+        const anchorTitle = extractAnchorCandidateTitle(seriesAnchor);
+        const seriesTitle = isGenericManhwaZoneLabel(anchorTitle)
+          ? seriesNameFromSeriesUrl(seriesUrl)
+          : anchorTitle || seriesNameFromSeriesUrl(seriesUrl);
+        upsertManhwaZoneCandidate(candidates, seriesUrl, seriesTitle, resolved);
+      });
+    });
+
+    $("a[href]").each((_, el) => {
+      const anchor = $(el);
+      const href = anchor.attr("href") ?? "";
+      const resolved = resolveUrl(MANHWAZONE_BASE_URL, href);
+      if (!isManhwaZoneSeriesUrl(resolved)) {
+        return;
+      }
+
+      const anchorTitle = extractAnchorCandidateTitle(anchor);
+      const seriesTitle = isGenericManhwaZoneLabel(anchorTitle)
+        ? seriesNameFromSeriesUrl(resolved)
+        : anchorTitle || seriesNameFromSeriesUrl(resolved);
+      upsertManhwaZoneCandidate(candidates, resolved, seriesTitle);
+    });
+
+    const sorted = Array.from(candidates.values())
+      .sort((a, b) => {
+        const scoreA = Math.max(
+          titleSimilarityScore(title, a.title),
+          titleSimilarityScore(title, seriesNameFromSeriesUrl(a.url))
+        );
+        const scoreB = Math.max(
+          titleSimilarityScore(title, b.title),
+          titleSimilarityScore(title, seriesNameFromSeriesUrl(b.url))
+        );
+        return scoreB - scoreA;
+      })
+      .slice(0, MANHWAZONE_SEARCH_LIMIT);
+
+    // eslint-disable-next-line no-console
+    console.log(`[read-now] manhwazone candidates=${sorted.length} query="${title.substring(0, 60)}"`);
+
+    return sorted;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[read-now] manhwazone fetch error query="${title.substring(0, 60)}": ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
+type DirectSourceChapter = { number: string; title: string | null; url: string; special?: boolean };
+
+function cleanChapterLabel(value: string | null | undefined): string {
+  const cleaned = cleanCandidateText(value);
+  const chapterMatch = cleaned.match(/\b(?:chapter|ch\.?|episode|ep\.?)\s*-?\d+(?:\.\d+)?\b/i);
+  return chapterMatch?.[0]?.trim() || cleaned;
+}
+
+function inferChapterLabel(title: string, url: string): string {
+  const cleanedTitle = cleanChapterLabel(title);
+  if (cleanedTitle) {
+    return cleanedTitle;
+  }
+
+  const urlMatch = url.match(/(?:chapter|\/c|episode|ep)[-_/]?(\d+(?:\.\d+)?)/i);
+  if (urlMatch?.[1]) {
+    return urlMatch[1];
+  }
+
+  return url.split("/").filter(Boolean).at(-1)?.slice(0, 64) || "Unknown";
+}
+
+function getWeebCentralChapterGrid($: cheerio.CheerioAPI): cheerio.Cheerio<any> {
+  return $("div.grid.grid-cols-2.gap-3.justify-items-center").filter((_, node) =>
+    ($(node).attr("class") ?? "").split(/\s+/).includes("lg:grid-cols-3")
+  );
+}
+
+function getWeebCentralButtonChapterUrl(button: cheerio.Cheerio<any>, baseUrl: string): string {
+  for (const attr of ["href", "data-url", "data-href", "hx-get", "formaction"]) {
+    const value = button.attr(attr);
+    if (!value) {
+      continue;
+    }
+
+    const resolved = resolveUrl(baseUrl, value);
+    if (isWeebCentralChapterUrl(resolved)) {
+      return resolved;
+    }
+  }
+
+  return baseUrl;
+}
+
+function parseWeebCentralSeriesChapterList($: cheerio.CheerioAPI, baseUrl: string): DirectSourceChapter[] {
+  const unique = new Map<string, DirectSourceChapter>();
+  const chapterGrid = getWeebCentralChapterGrid($);
+
+  chapterGrid.find("a[href]").each((_, node) => {
+    const anchor = $(node);
+    const url = resolveUrl(baseUrl, anchor.attr("href") ?? "");
+    if (!url) {
       return;
     }
-    const resolved = `https://mangabuddy.com${href}`;
-    if (!seriesUrls.includes(resolved)) seriesUrls.push(resolved);
+
+    const title = cleanChapterLabel(anchor.text());
+    unique.set(url, {
+      number: inferChapterLabel(title, url),
+      title: title || null,
+      url
+    });
   });
 
+  chapterGrid.find("button#selected_chapter").each((_, node) => {
+    const button = $(node);
+    const title = cleanChapterLabel(button.text());
+    if (!title) {
+      return;
+    }
+
+    const url = getWeebCentralButtonChapterUrl(button, baseUrl);
+    unique.set(url, {
+      number: inferChapterLabel(title, url),
+      title,
+      url
+    });
+  });
+
+  $("#chapter-list a[href*='/chapters/']").each((_, node) => {
+    const anchor = $(node);
+    const url = resolveUrl(baseUrl, anchor.attr("href") ?? "");
+    if (!isWeebCentralChapterUrl(url)) {
+      return;
+    }
+
+    const title = cleanChapterLabel(anchor.text());
+    unique.set(url, {
+      number: inferChapterLabel(title, url),
+      title: title || null,
+      url
+    });
+  });
+
+  return Array.from(unique.values());
+}
+
+function parseManhwaZoneSeriesChapterList($: cheerio.CheerioAPI, baseUrl: string): DirectSourceChapter[] {
+  const unique = new Map<string, DirectSourceChapter>();
+  const chapterList = $("ol[role='list'][aria-label='List of chapters'].space-y-3");
+
+  chapterList.find("li[role='listitem']").each((_, node) => {
+    const anchor = $(node).find("a[href]").first();
+    const href = anchor.attr("href") ?? "";
+    if (!href) {
+      return;
+    }
+
+    const url = resolveUrl(baseUrl, href);
+    const title = cleanChapterLabel(anchor.find("span.truncate.flex-1").first().text());
+    unique.set(url, {
+      number: inferChapterLabel(title, url),
+      title: title || null,
+      url
+    });
+  });
+
+  return Array.from(unique.values());
+}
+
+async function resolveFirstWeebCentralChapterFromSeriesUrl(
+  seriesUrl: string,
+  fallbackTitle: string
+): Promise<{ chapterUrl: string; matchedTitle: string } | null> {
+  const fetched = await fetchChapterHtml(seriesUrl);
+  if (fetched.status >= 400 || !fetched.html) {
+    return null;
+  }
+
+  const $ = cheerio.load(fetched.html);
+  const chapterList = sortChapterList(parseWeebCentralSeriesChapterList($, fetched.finalUrl));
+  const firstChapter = chooseChapterOne(chapterList);
+  if (!firstChapter?.url) {
+    return null;
+  }
+
+  const rawTitle =
+    getMetaAttr($, "meta[property='og:title']", "content") ||
+    getFirstText($, TITLE_SELECTORS) ||
+    fallbackTitle ||
+    seriesNameFromSeriesUrl(seriesUrl);
+  const matchedTitle = cleanTitle(rawTitle) || fallbackTitle || seriesNameFromSeriesUrl(seriesUrl);
+  return {
+    chapterUrl: firstChapter.url,
+    matchedTitle
+  };
+}
+
+async function resolveFirstManhwaZoneChapterFromSeriesUrl(
+  seriesUrl: string,
+  fallbackTitle: string
+): Promise<{ chapterUrl: string; matchedTitle: string } | null> {
+  const fetched = await fetchChapterHtml(seriesUrl);
+  if (fetched.status >= 400 || !fetched.html) {
+    return null;
+  }
+
+  const $ = cheerio.load(fetched.html);
+  const chapterList = parseManhwaZoneSeriesChapterList($, fetched.finalUrl);
+
+  const sortedChapters = sortChapterList(chapterList);
+  const firstChapter = chooseChapterOne(sortedChapters);
+  if (!firstChapter?.url) {
+    return null;
+  }
+
+  const rawTitle =
+    getMetaAttr($, "meta[property='og:title']", "content") ||
+    getFirstText($, TITLE_SELECTORS) ||
+    fallbackTitle;
+  const matchedTitle = cleanTitle(rawTitle) || fallbackTitle;
+
+  return {
+    chapterUrl: firstChapter.url,
+    matchedTitle
+  };
+}
+
+function buildReadNowTitleCandidates(titles: string[] | string): string[] {
+  const rawTitles = Array.isArray(titles) ? titles : [titles];
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of rawTitles) {
+    const cleaned = cleanTitle(raw);
+    const variants = [
+      cleaned,
+      cleaned.replace(/\s*\([^)]*\)\s*/g, " "),
+      cleaned.split(/\s*[-–—:|]\s*/)[0] ?? ""
+    ];
+
+    for (const variant of variants) {
+      const value = cleanTitle(variant);
+      if (!isLatinReadableTitle(value)) {
+        continue;
+      }
+      const key = normalizeTitle(value);
+      if (!value || value.length < 2 || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      candidates.push(value);
+    }
+  }
+
+  return candidates.slice(0, 12);
+}
+
+function scoreSourceCandidate(queryTitle: string, candidate: SourceSeriesCandidate): number {
+  const slugTitle = seriesNameFromSeriesUrl(candidate.url);
+  return Math.max(
+    titleSimilarityScore(queryTitle, candidate.title),
+    titleSimilarityScore(queryTitle, slugTitle),
+    slugTitle ? titleSimilarityScore(queryTitle, slugTitle.replace(/\s+it$/, "").trim()) : 0
+  );
+}
+
+function chooseBestSourceMatch(
+  queryTitles: string[],
+  candidates: SourceSeriesCandidate[],
+  minScore = MIN_READ_NOW_TITLE_SCORE
+): SourceReadNowMatch | null {
+  const scored = queryTitles.flatMap((queryTitle) =>
+    candidates.map((candidate) => ({
+      queryTitle,
+      candidate,
+      score: scoreSourceCandidate(queryTitle, candidate)
+    }))
+  ).sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  return best && best.score >= minScore ? best : null;
+}
+
+async function resolveWeebCentralReadNowFromTitles(queryTitles: string[]): Promise<ReadNowResolution | null> {
+  const candidates: SourceSeriesCandidate[] = [];
+  for (const queryTitle of queryTitles) {
+    candidates.push(...await fetchWeebCentralSearchSeriesCandidates(queryTitle));
+  }
+
+  const selectedMatch = chooseBestSourceMatch(queryTitles, candidates);
+  if (!selectedMatch) {
+    // eslint-disable-next-line no-console
+    console.log(`[read-now] weebcentral no loose match candidates=${candidates.length}`);
+    return null;
+  }
+
   // eslint-disable-next-line no-console
-  console.log(`[search] mangabuddy extracted ${seriesUrls.length} urls`);
-  return seriesUrls.slice(0, MAX_CANDIDATE_URLS);
+  console.log(`[read-now] weebcentral selected title="${selectedMatch.candidate.title}" url=${selectedMatch.candidate.url} score=${selectedMatch.score.toFixed(2)}`);
+
+  const resolved = await resolveFirstWeebCentralChapterFromSeriesUrl(
+    selectedMatch.candidate.url,
+    selectedMatch.candidate.title
+  );
+  if (!resolved) {
+    return null;
+  }
+
+  return {
+    requestedTitle: queryTitles[0] ?? selectedMatch.queryTitle,
+    matchedTitle: resolved.matchedTitle,
+    seriesUrl: selectedMatch.candidate.url,
+    chapterUrl: resolved.chapterUrl,
+    sourceDomain: extractDomain(resolved.chapterUrl)
+  };
+}
+
+async function resolveManhwaZoneReadNowFromTitles(queryTitles: string[]): Promise<ReadNowResolution | null> {
+  const candidates: SourceSeriesCandidate[] = [];
+  for (const queryTitle of queryTitles) {
+    candidates.push(...await fetchManhwaZoneSearchSeriesCandidates(queryTitle));
+  }
+
+  const selectedMatch = chooseBestSourceMatch(queryTitles, candidates);
+  if (!selectedMatch) {
+    // eslint-disable-next-line no-console
+    console.log(`[read-now] manhwazone no loose match candidates=${candidates.length}`);
+    return null;
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(`[read-now] manhwazone selected title="${selectedMatch.candidate.title}" url=${selectedMatch.candidate.url} score=${selectedMatch.score.toFixed(2)}`);
+
+  let resolved = await resolveFirstManhwaZoneChapterFromSeriesUrl(
+    selectedMatch.candidate.url,
+    selectedMatch.candidate.title
+  );
+  if (!resolved?.chapterUrl && selectedMatch.candidate.firstChapterUrl) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[read-now] manhwazone using search preview chapter url=${selectedMatch.candidate.firstChapterUrl}`
+    );
+    resolved = {
+      chapterUrl: selectedMatch.candidate.firstChapterUrl,
+      matchedTitle: selectedMatch.candidate.title
+    };
+  }
+  if (!resolved) {
+    return null;
+  }
+
+  return {
+    requestedTitle: queryTitles[0] ?? selectedMatch.queryTitle,
+    matchedTitle: resolved.matchedTitle,
+    seriesUrl: selectedMatch.candidate.url,
+    chapterUrl: resolved.chapterUrl,
+    sourceDomain: extractDomain(resolved.chapterUrl)
+  };
+}
+
+export async function resolveDirectReadNow(
+  titles: string[] | string,
+  options: ReadNowResolveOptions = {}
+): Promise<ReadNowResolution | null> {
+  void options;
+  const queryTitles = buildReadNowTitleCandidates(titles);
+  if (queryTitles.length === 0) {
+    return null;
+  }
+
+  const resolveWeebCentral = () => resolveWeebCentralReadNowFromTitles(queryTitles);
+  const resolveManhwaZone = () => resolveManhwaZoneReadNowFromTitles(queryTitles);
+
+  return (await resolveWeebCentral()) ?? (await resolveManhwaZone());
 }
 
 function extractDomain(url: string): string {
@@ -522,6 +1031,8 @@ function resolveUrl(base: string, href: string): string {
 
 function cleanTitle(raw: string): string {
   let t = raw.trim();
+
+  t = t.replace(/\s+cover\s*$/i, "").trim();
 
   // Remove everything after | (site name separator, e.g. "One Piece | MangaDex")
   t = t.replace(/\s*\|.*$/, "").trim();
@@ -698,35 +1209,97 @@ function isTitleRelevant(title: string, query: string): boolean {
   return matches >= Math.ceil(words.length / 2);
 }
 
+async function buildDirectSearchResult(
+  candidate: SourceSeriesCandidate,
+  sourceAdapter: "weebcentral" | "manhwazone"
+): Promise<MangaSearchResult | null> {
+  const resolved =
+    sourceAdapter === "weebcentral"
+      ? await resolveFirstWeebCentralChapterFromSeriesUrl(candidate.url, candidate.title)
+      : await resolveFirstManhwaZoneChapterFromSeriesUrl(candidate.url, candidate.title);
+
+  if (!resolved) {
+    return null;
+  }
+
+  let coverUrl: string | null = null;
+  let genres: string[] = [];
+  let chapterCount = 0;
+
+  try {
+    const fetched = await fetchChapterHtml(candidate.url);
+    const adapter = resolveAdapterForUrl(candidate.url);
+    if (fetched.status < 400 && fetched.html && adapter) {
+      const parsed = adapter.parse(fetched.html, fetched.finalUrl);
+      coverUrl = parsed.series.coverUrl ?? null;
+      genres = parsed.series.genres ?? [];
+      chapterCount = parsed.chapterList.length;
+    }
+  } catch {
+    // Metadata is optional for search cards; the resolved chapter URL is required.
+  }
+
+  return {
+    seriesTitle: resolved.matchedTitle || candidate.title,
+    coverUrl,
+    firstChapterUrl: resolved.chapterUrl,
+    chapterCount,
+    genres: genres.slice(0, 6),
+    adapter: sourceAdapter,
+    sourceDomain: extractDomain(resolved.chapterUrl)
+  };
+}
+
+async function fetchStrictDirectSearchMatches(
+  query: string,
+  sourceAdapter: "weebcentral" | "manhwazone"
+): Promise<SourceSeriesCandidate[]> {
+  const queryTitles = buildReadNowTitleCandidates(query);
+  const candidates: SourceSeriesCandidate[] = [];
+
+  for (const queryTitle of queryTitles) {
+    candidates.push(
+      ...(sourceAdapter === "weebcentral"
+        ? await fetchWeebCentralSearchSeriesCandidates(queryTitle)
+        : await fetchManhwaZoneSearchSeriesCandidates(queryTitle))
+    );
+  }
+
+  const seen = new Set<string>();
+  return queryTitles
+    .flatMap((queryTitle) =>
+      candidates.map((candidate) => ({
+        candidate,
+        score: scoreSourceCandidate(queryTitle, candidate)
+      }))
+    )
+    .filter((entry) => entry.score >= MIN_READ_NOW_TITLE_SCORE)
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.candidate)
+    .filter((candidate) => {
+      if (seen.has(candidate.url)) {
+        return false;
+      }
+      seen.add(candidate.url);
+      return true;
+    })
+    .slice(0, MAX_CANDIDATE_URLS);
+}
+
 export async function searchManga(query: string): Promise<MangaSearchResult[]> {
-  // Primary query: exact phrase match for precision
-  let rawUrls = await fetchDuckDuckGoUrls(`"${query}" read manga manhwa online chapter 1`);
-
-  // Fallback 1: unquoted DDG query (helps with off-hours throttling / rare titles)
-  if (rawUrls.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log(`[search] primary returned 0 urls, trying fallback for "${query}"`);
-    rawUrls = await fetchDuckDuckGoUrls(`${query} read manga manhwa online chapter 1`);
+  let sourceAdapter: "weebcentral" | "manhwazone" = "weebcentral";
+  let candidates = await fetchStrictDirectSearchMatches(query, "weebcentral");
+  if (candidates.length === 0) {
+    sourceAdapter = "manhwazone";
+    candidates = await fetchStrictDirectSearchMatches(query, "manhwazone");
   }
 
-  // Fallback 2: MangaBuddy direct search (when DDG is rate-limited / returning 202)
-  if (rawUrls.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log(`[search] ddg yielded 0 urls, trying MangaBuddy for "${query}"`);
-    rawUrls = await fetchMangaBuddyUrls(query);
-  }
-
-  // Prefer chapter-page URLs; still include series pages as fallback
-  const safeUrls = rawUrls.filter(isSafeToIngest);
-  const chapterUrls = safeUrls.filter(looksLikeChapterUrlForSearch);
-  const otherUrls = safeUrls.filter((u) => !looksLikeChapterUrlForSearch(u));
-  const candidates = [...chapterUrls, ...otherUrls].slice(0, MAX_CANDIDATE_URLS);
   if (candidates.length === 0) {
     return [];
   }
 
   // eslint-disable-next-line no-console
-  console.log(`[search] candidates=${candidates.length} chapter=${chapterUrls.length} other=${otherUrls.length}`);
+  console.log(`[search] source=${sourceAdapter} candidates=${candidates.length}`);
 
   const deadline = Date.now() + SEARCH_DEADLINE_MS;
   const seenTitles = new Set<string>();
@@ -738,15 +1311,15 @@ export async function searchManga(query: string): Promise<MangaSearchResult[]> {
     }
 
     const batch = candidates.slice(i, i + SEARCH_CONCURRENCY);
-    const settled = await Promise.allSettled(batch.map(lightIngestWithTimeout));
+    const settled = await Promise.allSettled(batch.map((candidate) => buildDirectSearchResult(candidate, sourceAdapter)));
 
     for (const outcome of settled) {
       if (outcome.status !== "fulfilled" || !outcome.value) {
         continue;
       }
 
-      const { chapterUrl, result } = outcome.value;
-      const title = result.title;
+      const result = outcome.value;
+      const title = result.seriesTitle;
 
       if (!title) {
         continue;
@@ -766,15 +1339,7 @@ export async function searchManga(query: string): Promise<MangaSearchResult[]> {
 
       seenTitles.add(titleKey);
 
-      results.push({
-        seriesTitle: title,
-        coverUrl: result.coverUrl,
-        firstChapterUrl: chapterUrl,
-        chapterCount: result.chapterCount,
-        genres: result.genres,
-        adapter: result.sourceAdapter,
-        sourceDomain: extractDomain(chapterUrl)
-      });
+      results.push(result);
 
       if (results.length >= MAX_RESULTS) {
         break;

@@ -349,6 +349,87 @@ export function extractPanelCandidates($: CheerioAPI, selectors: string[], baseU
   return Array.from(unique.values());
 }
 
+function cleanChapterLabel(value: string | null | undefined): string {
+  const cleaned = (value ?? "").replace(/\s+/g, " ").trim();
+  const chapterMatch = cleaned.match(/\b(?:chapter|ch\.?|episode|ep\.?)\s*-?\d+(?:\.\d+)?\b/i);
+  return chapterMatch?.[0]?.trim() || cleaned;
+}
+
+function extractWeebcentralChapterLinks($: CheerioAPI, baseUrl: string): ChapterListItem[] {
+  const unique = new Map<string, ChapterListItem>();
+  const containers = $("div.grid.grid-cols-2.gap-3.justify-items-center").filter((_, node) =>
+    ($(node).attr("class") ?? "").split(/\s+/).includes("lg:grid-cols-3")
+  );
+
+  const addAnchor = (anchor: Cheerio<any>) => {
+    const href = toAbsoluteUrl(baseUrl, anchor.attr("href"));
+    if (!href || !/\/chapters\//i.test(href)) {
+      return;
+    }
+
+    const title = cleanChapterLabel(anchor.text());
+    unique.set(href, {
+      number: inferChapterNumber(title, href),
+      title: title || null,
+      url: href
+    });
+  };
+
+  containers.find("a[href]").each((_, node) => {
+    addAnchor($(node));
+  });
+
+  containers.find("button#selected_chapter").each((_, node) => {
+    const title = cleanChapterLabel($(node).text());
+    if (!title) {
+      return;
+    }
+
+    unique.set(baseUrl, {
+      number: inferChapterNumber(title, baseUrl),
+      title,
+      url: baseUrl
+    });
+  });
+
+  $("#chapter-list a[href*='/chapters/']").each((_, node) => {
+    addAnchor($(node));
+  });
+
+  if (/\/full-chapter-list(?:[?#]|$)/i.test(baseUrl)) {
+    $("a[href*='/chapters/']").each((_, node) => {
+      addAnchor($(node));
+    });
+  }
+
+  return Array.from(unique.values());
+}
+
+function extractManhwaZoneChapterLinks($: CheerioAPI, baseUrl: string): ChapterListItem[] {
+  const unique = new Map<string, ChapterListItem>();
+
+  $("ol[role='list'][aria-label='List of chapters'] li[role='listitem']").each((_, node) => {
+    const listItem = $(node);
+    const anchor = listItem.find("a[href]").first();
+    const href = toAbsoluteUrl(baseUrl, anchor.attr("href"));
+    if (!href) {
+      return;
+    }
+
+    const title =
+      cleanChapterLabel(anchor.find("span.truncate.flex-1").first().text()) ||
+      cleanChapterLabel(anchor.text());
+
+    unique.set(href, {
+      number: inferChapterNumber(title, href),
+      title: title || null,
+      url: href
+    });
+  });
+
+  return Array.from(unique.values());
+}
+
 export function extractChapterLinks($: CheerioAPI, selectors: string[], baseUrl: string): ChapterListItem[] {
   const unique = new Map<string, ChapterListItem>();
   let baseHostname = "";
@@ -361,6 +442,20 @@ export function extractChapterLinks($: CheerioAPI, selectors: string[], baseUrl:
 
   const normalizedBaseHostname = baseHostname ? normalizeHostname(baseHostname) : "";
   const baseSeriesKey = buildSeriesKey(baseUrl);
+
+  if (normalizedBaseHostname.endsWith("weebcentral.com")) {
+    const weebcentralChapters = extractWeebcentralChapterLinks($, baseUrl);
+    if (weebcentralChapters.length > 0) {
+      return weebcentralChapters;
+    }
+  }
+
+  if (normalizedBaseHostname.endsWith("manhwazone.com")) {
+    const manhwaZoneChapters = extractManhwaZoneChapterLinks($, baseUrl);
+    if (manhwaZoneChapters.length > 0) {
+      return manhwaZoneChapters;
+    }
+  }
 
   const candidateSelectors = selectors.length > 0 ? selectors : ["a[href]"];
   for (const selector of candidateSelectors) {
@@ -389,7 +484,9 @@ export function extractChapterLinks($: CheerioAPI, selectors: string[], baseUrl:
           return;
         }
 
-        if (baseSeriesKey && !isSameSeriesUrl(baseUrl, parsedHref.toString())) {
+        const isManhwaZonePreviewLink =
+          normalizedBaseHostname.endsWith("manhwazone.com") && parsedHref.pathname.startsWith("/preview/");
+        if (baseSeriesKey && !isManhwaZonePreviewLink && !isSameSeriesUrl(baseUrl, parsedHref.toString())) {
           return;
         }
       } catch {

@@ -20,27 +20,43 @@ interface ScrollReaderProps {
   onReadPreviousChapter: () => void;
   onReadNextChapter: () => void;
   onMobileSelectorVisibilityChange?: (visible: boolean) => void;
+  onReaderAtTopChange?: (atTop: boolean) => void;
+  onTopScrollAttempt?: () => void;
 }
 
-function panelStyle(settings: ReaderSettings): CSSProperties {
-  const zoom = settings.zoomPercent;
+const LONG_STRIP_HEIGHT_WIDTH_RATIO = 1.77;
 
-  if (settings.fitMode === "height-fit") {
+function resolveAutoFitMode(settings: ReaderSettings, heightWidthRatio: number | undefined): "height-fit" | "width-fit" {
+  if (heightWidthRatio === undefined) {
+    return settings.fitMode === "height-fit" ? "height-fit" : "width-fit";
+  }
+
+  return heightWidthRatio <= LONG_STRIP_HEIGHT_WIDTH_RATIO ? "height-fit" : "width-fit";
+}
+
+function panelStyle(settings: ReaderSettings, heightWidthRatio?: number): CSSProperties {
+  const zoom = settings.zoomPercent;
+  const fitMode =
+    settings.fitMode === "original" || settings.fitMode === "custom"
+      ? settings.fitMode
+      : resolveAutoFitMode(settings, heightWidthRatio);
+
+  if (fitMode === "height-fit") {
     return {
-      height: "70vh",
+      height: "calc(100dvh - 120px)",
       width: "auto",
       maxWidth: `${Math.max(100, zoom)}%`
     };
   }
 
-  if (settings.fitMode === "original") {
+  if (fitMode === "original") {
     return {
       width: "auto",
       maxWidth: "none"
     };
   }
 
-  if (settings.fitMode === "custom") {
+  if (fitMode === "custom") {
     return {
       width: `${zoom}%`,
       height: "auto"
@@ -98,7 +114,9 @@ export function ScrollReader({
   onVisiblePageChange,
   onReadPreviousChapter,
   onReadNextChapter,
-  onMobileSelectorVisibilityChange
+  onMobileSelectorVisibilityChange,
+  onReaderAtTopChange,
+  onTopScrollAttempt
 }: ScrollReaderProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const anchorIndexRef = useRef(0);
@@ -108,6 +126,7 @@ export function ScrollReader({
   const [currentPanelIndex, setCurrentPanelIndex] = useState(0);
   const [activePanels, setActivePanels] = useState<Set<number>>(new Set([0, 1, 2, 3, 4]));
   const [failedPanels, setFailedPanels] = useState<Set<number>>(new Set());
+  const [panelAspectRatios, setPanelAspectRatios] = useState<Record<number, number>>({});
   const [retryVersion, setRetryVersion] = useState<Record<number, number>>({});
   const [retryAttempts, setRetryAttempts] = useState<Record<number, number>>({});
   const [selectorVisible, setSelectorVisible] = useState(false);
@@ -116,13 +135,12 @@ export function ScrollReader({
   const selectorIdleTimerRef = useRef<number | null>(null);
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
-  const touchStartEdgeRef = useRef(false);
+  const touchStartBottomRef = useRef(false);
   const touchSelectorOpenRef = useRef(false);
   const suppressNextClickRef = useRef(false);
   const endNextHideTimerRef = useRef<number | null>(null);
   const [endNextVisible, setEndNextVisible] = useState(false);
 
-  const computedPanelStyle = useMemo(() => panelStyle(settings), [settings]);
   const selectorPinned = settings.pinVerticalPageSelector;
   const showSelector = selectorPinned || selectorVisible;
   const isOnLastPanel = currentPanelIndex >= Math.max(panelUrls.length - 1, 0);
@@ -292,13 +310,14 @@ export function ScrollReader({
     setProgress(0);
     setCurrentPanelIndex(startIndex);
     setFailedPanels(new Set());
+    setPanelAspectRatios({});
     setRetryVersion({});
     setRetryAttempts({});
     setSelectorVisible(selectorPinned);
     clearSelectorIdleTimer();
     touchStartXRef.current = null;
     touchStartYRef.current = null;
-    touchStartEdgeRef.current = false;
+    touchStartBottomRef.current = false;
     touchSelectorOpenRef.current = false;
     suppressNextClickRef.current = false;
     setEndNextVisible(false);
@@ -316,6 +335,7 @@ export function ScrollReader({
     const container = containerRef.current;
     if (container) {
       container.scrollTop = 0;
+      onReaderAtTopChange?.(true);
 
       if (startIndex > 0) {
         requestAnimationFrame(() => {
@@ -323,7 +343,7 @@ export function ScrollReader({
         });
       }
     }
-  }, [initialPageIndex, panelUrls, selectorPinned, settings.preloadDepth]);
+  }, [initialPageIndex, onReaderAtTopChange, panelUrls, selectorPinned, settings.preloadDepth]);
 
   useEffect(() => {
     if (!isOnLastPanel) {
@@ -455,6 +475,7 @@ export function ScrollReader({
       const nextProgress = Math.min(1, Math.max(0, container.scrollTop / maxScroll));
       setProgress(nextProgress);
       onProgressChange(nextProgress);
+      onReaderAtTopChange?.(container.scrollTop <= 0);
 
       const nearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 36;
       if (isOnLastPanel || nearBottom) {
@@ -465,7 +486,7 @@ export function ScrollReader({
     onScroll();
     container.addEventListener("scroll", onScroll, { passive: true });
     return () => container.removeEventListener("scroll", onScroll);
-  }, [isOnLastPanel, onProgressChange, panelUrls]);
+  }, [isOnLastPanel, onProgressChange, onReaderAtTopChange, panelUrls]);
 
   useEffect(() => {
     function onKeydown(event: KeyboardEvent) {
@@ -554,20 +575,11 @@ export function ScrollReader({
   }
 
   function handleReaderTouchStart(event: ReactTouchEvent<HTMLElement>) {
-    if (!settings.enableSwipeGestures) {
-      touchStartXRef.current = null;
-      touchStartYRef.current = null;
-      touchStartEdgeRef.current = false;
-      touchSelectorOpenRef.current = false;
-      revealEndNextButton();
-      return;
-    }
-
     const target = event.target as HTMLElement | null;
     if (target?.closest(".vertical-page-selector")) {
       touchStartXRef.current = null;
       touchStartYRef.current = null;
-      touchStartEdgeRef.current = false;
+      touchStartBottomRef.current = false;
       touchSelectorOpenRef.current = false;
       revealEndNextButton();
       return;
@@ -577,7 +589,7 @@ export function ScrollReader({
     if (!touch) {
       touchStartXRef.current = null;
       touchStartYRef.current = null;
-      touchStartEdgeRef.current = false;
+      touchStartBottomRef.current = false;
       touchSelectorOpenRef.current = false;
       revealEndNextButton();
       return;
@@ -587,17 +599,13 @@ export function ScrollReader({
     const touchX = touch.clientX - bounds.left;
     touchStartXRef.current = touchX;
     touchStartYRef.current = touch.clientY;
-    touchStartEdgeRef.current = Boolean(isMobileViewport() && touchX <= 22);
+    touchStartBottomRef.current = Boolean(isMobileViewport() && bounds.bottom - touch.clientY <= 34);
     touchSelectorOpenRef.current = false;
     revealEndNextButton();
   }
 
   function handleReaderTouchMove(event: ReactTouchEvent<HTMLElement>) {
-    if (!settings.enableSwipeGestures || touchStartXRef.current === null || touchStartYRef.current === null) {
-      return;
-    }
-
-    if (!isMobileViewport() || selectorPinned || !touchStartEdgeRef.current) {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) {
       return;
     }
 
@@ -606,12 +614,23 @@ export function ScrollReader({
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const touchX = touch.clientX - bounds.left;
-    const deltaX = touchX - touchStartXRef.current;
-    const deltaY = Math.abs(touch.clientY - touchStartYRef.current);
+    const container = containerRef.current;
+    if (isMobileViewport() && container && container.scrollTop <= 0) {
+      const pullDown = touch.clientY - touchStartYRef.current;
+      const horizontalMovement = Math.abs(touch.clientX - touchStartXRef.current);
+      if (pullDown > 42 && horizontalMovement < 56) {
+        onTopScrollAttempt?.();
+      }
+    }
 
-    if (deltaX > 56 && deltaY < 30 && deltaX > deltaY * 1.8) {
+    if (!settings.enableSwipeGestures || !isMobileViewport() || selectorPinned || !touchStartBottomRef.current) {
+      return;
+    }
+
+    const deltaX = Math.abs(touch.clientX - touchStartXRef.current);
+    const deltaY = touch.clientY - touchStartYRef.current;
+
+    if (deltaY < -42 && deltaX < 52) {
       touchSelectorOpenRef.current = true;
       suppressNextClickRef.current = true;
       setSelectorVisible(true);
@@ -625,20 +644,27 @@ export function ScrollReader({
     if (touchSelectorOpenRef.current) {
       touchStartXRef.current = null;
       touchStartYRef.current = null;
-      touchStartEdgeRef.current = false;
+      touchStartBottomRef.current = false;
       touchSelectorOpenRef.current = false;
       return;
     }
 
     touchStartXRef.current = null;
     touchStartYRef.current = null;
-    touchStartEdgeRef.current = false;
+    touchStartBottomRef.current = false;
   }
 
   function handleReaderClick(event: ReactMouseEvent<HTMLElement>) {
     if (suppressNextClickRef.current) {
       suppressNextClickRef.current = false;
       event.preventDefault();
+    }
+  }
+
+  function handleReaderWheel(event: React.WheelEvent<HTMLElement>) {
+    const container = containerRef.current;
+    if (isMobileViewport() && container && container.scrollTop <= 0 && event.deltaY < 0) {
+      onTopScrollAttempt?.();
     }
   }
 
@@ -652,6 +678,7 @@ export function ScrollReader({
       onTouchStart={handleReaderTouchStart}
       onTouchMove={handleReaderTouchMove}
       onTouchEnd={handleReaderTouchEnd}
+      onWheel={handleReaderWheel}
     >
       <aside
         className={`vertical-page-selector ${showSelector ? "visible" : "hidden"} ${selectorPinned ? "pinned" : ""}`}
@@ -718,6 +745,7 @@ export function ScrollReader({
           const isActive = activePanels.has(index);
           const isLastPanel = index === panelUrls.length - 1;
           const showEndNextOnPanel = isLastPanel && endNextVisible;
+          const computedPanelStyle = panelStyle(settings, panelAspectRatios[index]);
 
           return (
             <article className="scroll-panel" key={`${panelUrl}:${index}`} data-index={index}>
@@ -737,6 +765,19 @@ export function ScrollReader({
                       loading={Math.abs(index - currentPanelIndex) <= 1 ? "eager" : "lazy"}
                       onLoad={(event) => {
                         clearRetryState(index);
+                        const image = event.currentTarget;
+                        const ratio =
+                          image.naturalWidth > 0 && image.naturalHeight > 0
+                            ? image.naturalHeight / image.naturalWidth
+                            : undefined;
+                        if (ratio !== undefined) {
+                          setPanelAspectRatios((prev) => {
+                            if (prev[index] === ratio) {
+                              return prev;
+                            }
+                            return { ...prev, [index]: ratio };
+                          });
+                        }
                         markImageLoaded(event.currentTarget.currentSrc || relayImageUrl(panelUrl));
                         logImageLoadTiming(`scroll-visible:${index + 1}`, panelUrl, event.currentTarget);
                       }}

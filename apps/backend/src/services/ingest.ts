@@ -39,6 +39,9 @@ const CHAPTER_IN_SEGMENT_PATTERN =
   /(?:-|_| )?(?:chapter|chap|ch|episode|ep|c)[-_ ]*\d+(?:\.\d+)?(?:[-_ ]?(?:v|p)\d+)?$/i;
 const WEEBCENTRAL_IMAGE_RE =
   /https?:\/\/[^"'\s<>]+\.(?:png|jpg|jpeg|webp|avif)(?:\?[^"'\s<>]*)?/gi;
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 function looksLikeChapterUrl(url: string): boolean {
   return /(?:\/|-)chapter[-_/ ]?\d+|\bc\d+(?:\.\d+)?\b|(?:\/|-)ep(?:isode)?[-_/ ]?\d+/i.test(url);
@@ -162,6 +165,10 @@ function buildSeriesKey(url: string): string | null {
 }
 
 function isSameSeriesUrl(baseUrl: string, candidateUrl: string): boolean {
+  if (isSourceSiblingChapterUrl(baseUrl, candidateUrl)) {
+    return true;
+  }
+
   const baseKey = buildSeriesKey(baseUrl);
   const candidateKey = buildSeriesKey(candidateUrl);
 
@@ -170,6 +177,30 @@ function isSameSeriesUrl(baseUrl: string, candidateUrl: string): boolean {
   }
 
   return baseKey === candidateKey;
+}
+
+function isSourceSiblingChapterUrl(baseUrl: string, candidateUrl: string): boolean {
+  try {
+    const base = new URL(baseUrl);
+    const candidate = new URL(candidateUrl);
+    const baseHost = normalizeHost(base.hostname);
+    const candidateHost = normalizeHost(candidate.hostname);
+    if (baseHost !== candidateHost) {
+      return false;
+    }
+
+    if (baseHost.endsWith("weebcentral.com")) {
+      return base.pathname.startsWith("/chapters/") && candidate.pathname.startsWith("/chapters/");
+    }
+
+    if (baseHost.endsWith("manhwazone.com")) {
+      return base.pathname.startsWith("/preview/") && candidate.pathname.startsWith("/preview/");
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function filterChapterListToSeries(baseUrl: string, chapters: ChapterListItem[]): ChapterListItem[] {
@@ -289,6 +320,317 @@ async function enrichSparseChapterList(
   }
 
   return merged;
+}
+
+function isWeebCentralUrl(url: string): boolean {
+  try {
+    return normalizeHost(new URL(url).hostname).endsWith("weebcentral.com");
+  } catch {
+    return false;
+  }
+}
+
+function isManhwaZoneUrl(url: string): boolean {
+  try {
+    return normalizeHost(new URL(url).hostname).endsWith("manhwazone.com");
+  } catch {
+    return false;
+  }
+}
+
+function isSourceSeriesPageUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = normalizeHost(parsed.hostname);
+    const segments = splitLowerPathSegments(parsed.pathname);
+    const first = segments[0] ?? "";
+
+    if (host.endsWith("weebcentral.com")) {
+      return first === "series" && Boolean(segments[1]) && segments[1] !== "random";
+    }
+
+    if (host.endsWith("manhwazone.com")) {
+      return segments.length > 0 && first !== "preview" && first !== "search";
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function findSourceSeriesUrlFromHtml(html: string, chapterUrl: string): string | null {
+  if (!isWeebCentralUrl(chapterUrl) && !isManhwaZoneUrl(chapterUrl)) {
+    return null;
+  }
+
+  if (isSourceSeriesPageUrl(chapterUrl)) {
+    return chapterUrl;
+  }
+
+  const $ = cheerio.load(html);
+  const candidates = new Set<string>();
+
+  $("a[href]").each((_, node) => {
+    const href = toAbsoluteUrl(chapterUrl, $(node).attr("href"));
+    if (!href || normalizeComparableUrl(href) === normalizeComparableUrl(chapterUrl)) {
+      return;
+    }
+
+    if (isSourceSeriesPageUrl(href)) {
+      candidates.add(href);
+    }
+  });
+
+  return candidates.values().next().value ?? null;
+}
+
+function getWeebCentralFullChapterListUrl($: cheerio.CheerioAPI, seriesUrl: string): string | null {
+  const explicit = $("[hx-get*='full-chapter-list']").first().attr("hx-get");
+  const resolvedExplicit = toAbsoluteUrl(seriesUrl, explicit);
+  if (resolvedExplicit) {
+    return resolvedExplicit;
+  }
+
+  try {
+    const parsed = new URL(seriesUrl);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments[0] !== "series" || !segments[1]) {
+      return null;
+    }
+
+    return `${parsed.origin}/series/${segments[1]}/full-chapter-list`;
+  } catch {
+    return null;
+  }
+}
+
+function getCookieHeader(setCookieHeader: string | null): string {
+  if (!setCookieHeader) {
+    return "";
+  }
+
+  return setCookieHeader
+    .split(/,\s*(?=[^;,]+=)/)
+    .map((cookie) => cookie.split(";")[0]?.trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
+function findManhwaZoneChapterSnapshot($: cheerio.CheerioAPI): string | null {
+  let snapshot: string | null = null;
+
+  $("[wire\\:snapshot]").each((_, node) => {
+    const element = $(node);
+    if (element.attr("wire:init") !== "bootLoad") {
+      return;
+    }
+
+    const candidate = element.attr("wire:snapshot");
+    if (candidate?.includes('"common.chapter-list"')) {
+      snapshot = candidate;
+    }
+  });
+
+  return snapshot;
+}
+
+function collectManhwaZoneChapterObjects(value: unknown, output: Array<Record<string, unknown>>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectManhwaZoneChapterObjects(item, output);
+    }
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.web_url === "string" && typeof record.name === "string") {
+    output.push(record);
+    return;
+  }
+
+  for (const item of Object.values(record)) {
+    collectManhwaZoneChapterObjects(item, output);
+  }
+}
+
+function parseManhwaZoneChaptersFromSnapshot(snapshot: string, baseUrl: string): {
+  chapters: ChapterListItem[];
+  hasMore: boolean;
+} {
+  const parsed = JSON.parse(snapshot) as { data?: Record<string, unknown> };
+  const data = parsed.data ?? {};
+  const chapterObjects: Array<Record<string, unknown>> = [];
+  collectManhwaZoneChapterObjects(data.chapters, chapterObjects);
+
+  const chapters = chapterObjects
+    .map((chapter) => {
+      const url = toAbsoluteUrl(baseUrl, chapter.web_url as string);
+      if (!url) {
+        return null;
+      }
+
+      const name = String(chapter.name ?? "").replace(/\s+/g, " ").trim();
+      const chapterNo = String(chapter.chapter_no ?? "").replace(/\s+/g, " ").trim();
+      return {
+        number: chapterNo || name || url.split("/").filter(Boolean).at(-1)?.slice(0, 64) || "Unknown",
+        title: name || null,
+        url
+      };
+    })
+    .filter((chapter): chapter is ChapterListItem => Boolean(chapter));
+
+  return {
+    chapters,
+    hasMore: data.hasMore === true
+  };
+}
+
+async function postManhwaZoneLivewire(
+  endpoint: string,
+  referer: string,
+  token: string,
+  cookieHeader: string,
+  snapshot: string,
+  method: "bootLoad" | "loadMore"
+): Promise<string | null> {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "User-Agent": BROWSER_UA,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-CSRF-TOKEN": token,
+      "X-Livewire": "true",
+      Referer: referer,
+      ...(cookieHeader ? { Cookie: cookieHeader } : {})
+    },
+    body: JSON.stringify({
+      _token: token,
+      components: [
+        {
+          snapshot,
+          updates: {},
+          calls: [{ path: "", method, params: [] }]
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json()) as {
+    components?: Array<{ snapshot?: string }>;
+  };
+
+  return payload.components?.[0]?.snapshot ?? null;
+}
+
+async function fetchManhwaZoneLivewireChapterList(seriesUrl: string): Promise<ChapterListItem[]> {
+  try {
+    const seriesResponse = await fetch(seriesUrl, {
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
+      }
+    });
+    if (!seriesResponse.ok) {
+      return [];
+    }
+
+    const html = await seriesResponse.text();
+    const $ = cheerio.load(html);
+    const token = $("meta[name='csrf-token']").attr("content") ?? "";
+    let snapshot = findManhwaZoneChapterSnapshot($);
+    if (!token || !snapshot) {
+      return [];
+    }
+
+    const endpoint = new URL("/livewire/update", seriesUrl).toString();
+    const cookieHeader = getCookieHeader(seriesResponse.headers.get("set-cookie"));
+    const unique = new Map<string, ChapterListItem>();
+
+    const methods: Array<"bootLoad" | "loadMore"> = ["bootLoad", ...Array.from({ length: 20 }, () => "loadMore" as const)];
+    for (const method of methods) {
+      const nextSnapshot = await postManhwaZoneLivewire(
+        endpoint,
+        seriesUrl,
+        token,
+        cookieHeader,
+        snapshot,
+        method
+      );
+      if (!nextSnapshot) {
+        break;
+      }
+
+      snapshot = nextSnapshot;
+      const parsed = parseManhwaZoneChaptersFromSnapshot(snapshot, seriesUrl);
+      for (const chapter of parsed.chapters) {
+        unique.set(normalizeComparableUrl(chapter.url), chapter);
+      }
+
+      if (!parsed.hasMore) {
+        break;
+      }
+    }
+
+    return Array.from(unique.values());
+  } catch {
+    return [];
+  }
+}
+
+async function fetchSourceSeriesChapterList(chapterUrl: string, html: string): Promise<ChapterListItem[]> {
+  const seriesUrl = findSourceSeriesUrlFromHtml(html, chapterUrl);
+  if (!seriesUrl) {
+    return [];
+  }
+
+  try {
+    const fetched = await fetchChapterHtml(seriesUrl);
+    if (fetched.status >= 400 || !fetched.html) {
+      return [];
+    }
+
+    if (isManhwaZoneUrl(seriesUrl)) {
+      const livewireList = await fetchManhwaZoneLivewireChapterList(seriesUrl);
+      if (livewireList.length > 0) {
+        return livewireList;
+      }
+    }
+
+    const $ = cheerio.load(fetched.html);
+    const discovered = extractChapterLinks($, CHAPTER_LINK_SELECTORS, fetched.finalUrl);
+
+    if (isWeebCentralUrl(seriesUrl)) {
+      const fullChapterListUrl = getWeebCentralFullChapterListUrl($, fetched.finalUrl);
+      if (fullChapterListUrl) {
+        const fullListFetched = await fetchChapterHtml(fullChapterListUrl);
+        if (fullListFetched.status < 400 && fullListFetched.html) {
+          const fullList = extractChapterLinks(
+            cheerio.load(fullListFetched.html),
+            CHAPTER_LINK_SELECTORS,
+            fullListFetched.finalUrl
+          );
+          if (fullList.length > discovered.length) {
+            return fullList;
+          }
+        }
+      }
+    }
+
+    return discovered;
+  } catch {
+    return [];
+  }
 }
 
 function toAbsoluteUrl(baseUrl: string, value: string | null | undefined): string | null {
@@ -512,8 +854,11 @@ async function ingestUrlInternal(rawUrl: string, depth: number): Promise<IngestR
     );
   }
 
+  const sourceSeriesChapterList = await fetchSourceSeriesChapterList(fetched.finalUrl, fetched.html);
+  const discoveredChapterList =
+    sourceSeriesChapterList.length > 0 ? sourceSeriesChapterList : extracted.chapterList;
   const chapterListInput = mergeUniqueChapters([
-    ...extracted.chapterList,
+    ...discoveredChapterList,
     {
       number: extracted.chapter.number,
       title: extracted.chapter.title,

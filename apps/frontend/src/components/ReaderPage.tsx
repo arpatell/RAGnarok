@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { ApiRequestError, fetchJikanMangaChapterCount, fetchSuggestions, ingestChapter, relayImageUrl } from "../lib/api";
 import { isImageLoaded, isImageLoading, preloadImageOnce } from "../lib/imagePreload";
 import {
@@ -197,6 +197,10 @@ function buildSeriesKey(url: string): string | null {
 }
 
 function isSameSeriesUrl(baseUrl: string, candidateUrl: string): boolean {
+  if (isSourceSiblingChapterUrl(baseUrl, candidateUrl)) {
+    return true;
+  }
+
   const baseKey = buildSeriesKey(baseUrl);
   const candidateKey = buildSeriesKey(candidateUrl);
   if (!baseKey || !candidateKey) {
@@ -204,6 +208,30 @@ function isSameSeriesUrl(baseUrl: string, candidateUrl: string): boolean {
   }
 
   return baseKey === candidateKey;
+}
+
+function isSourceSiblingChapterUrl(baseUrl: string, candidateUrl: string): boolean {
+  try {
+    const base = new URL(baseUrl);
+    const candidate = new URL(candidateUrl);
+    const baseHost = normalizeHost(base.hostname);
+    const candidateHost = normalizeHost(candidate.hostname);
+    if (baseHost !== candidateHost) {
+      return false;
+    }
+
+    if (baseHost.endsWith("weebcentral.com")) {
+      return base.pathname.startsWith("/chapters/") && candidate.pathname.startsWith("/chapters/");
+    }
+
+    if (baseHost.endsWith("manhwazone.com")) {
+      return base.pathname.startsWith("/preview/") && candidate.pathname.startsWith("/preview/");
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function filterChapterListBySeries(baseUrl: string, chapters: ChapterListItem[]): ChapterListItem[] {
@@ -493,21 +521,17 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
   const [chapterNavigationStatus, setChapterNavigationStatus] = useState<string | null>(null);
   const [jikanChapterCount, setJikanChapterCount] = useState<number | null>(null);
   const [isFavorited, setIsFavorited] = useState(false);
-  const [mobileSelectorVisible, setMobileSelectorVisible] = useState(false);
   const [loadedChapterUrl, setLoadedChapterUrl] = useState<string | null>(null);
   const [topBarPeekVisible, setTopBarPeekVisible] = useState(false);
+  const [readerAtAbsoluteTop, setReaderAtAbsoluteTop] = useState(true);
+  const [mobileTopChromeRequested, setMobileTopChromeRequested] = useState(false);
   const fallbackChapterUrl = useMemo(() => findPreviousSuccessfulChapterUrl(chapterUrl), [chapterUrl]);
 
-  const longPanelPromptedRef = useRef(false);
   const pendingEntryPointRef = useRef<ChapterEntryPoint>("first");
   const settingsPanelRef = useRef<HTMLElement>(null);
   const previousSettingsOpenRef = useRef(false);
   const topBarPeekHideTimerRef = useRef<number | null>(null);
-  const mobileTopSwipeStartRef = useRef<{ x: number; y: number; tracking: boolean }>({
-    x: 0,
-    y: 0,
-    tracking: false
-  });
+  const mobileTopChromeHideTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     setDraftUrl(chapterUrl);
@@ -525,12 +549,6 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  useEffect(() => {
-    if (!isMobileViewport || mode !== "paginated") {
-      setMobileSelectorVisible(false);
-    }
-  }, [isMobileViewport, mode]);
 
   useEffect(() => {
     if (mode !== "scroll") {
@@ -577,7 +595,21 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
 
   useEffect(() => {
     setChapterNavigationStatus(null);
+    setReaderAtAbsoluteTop(true);
+    setMobileTopChromeRequested(false);
   }, [chapterUrl]);
+
+  useEffect(() => {
+    if (readerAtAbsoluteTop) {
+      return;
+    }
+
+    setMobileTopChromeRequested(false);
+    if (mobileTopChromeHideTimerRef.current !== null) {
+      window.clearTimeout(mobileTopChromeHideTimerRef.current);
+      mobileTopChromeHideTimerRef.current = null;
+    }
+  }, [readerAtAbsoluteTop]);
 
   useEffect(() => {
     if (!chromeHidden) {
@@ -593,6 +625,9 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
     return () => {
       if (topBarPeekHideTimerRef.current !== null) {
         window.clearTimeout(topBarPeekHideTimerRef.current);
+      }
+      if (mobileTopChromeHideTimerRef.current !== null) {
+        window.clearTimeout(mobileTopChromeHideTimerRef.current);
       }
     };
   }, []);
@@ -624,7 +659,6 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
 
         setData(result);
         setLoadedChapterUrl(chapterUrl);
-        longPanelPromptedRef.current = false;
         markChapterRead(chapterUrl);
         setIsFavorited(isSeriesFavorited(result.series.title));
 
@@ -962,21 +996,6 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
     }
   }
 
-  function revealTopBarPeekFromMobileGesture() {
-    if (!chromeHidden || !isMobileViewport || sidebarOpen) {
-      return;
-    }
-
-    setTopBarPeekVisible(true);
-    if (topBarPeekHideTimerRef.current !== null) {
-      window.clearTimeout(topBarPeekHideTimerRef.current);
-    }
-    topBarPeekHideTimerRef.current = window.setTimeout(() => {
-      setTopBarPeekVisible(false);
-      topBarPeekHideTimerRef.current = null;
-    }, 3000);
-  }
-
   function handleShellMouseMove(event: ReactMouseEvent<HTMLDivElement>) {
     if (isMobileViewport || !chromeHidden || sidebarOpen) {
       return;
@@ -996,46 +1015,19 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
     setTopBarPeekVisible(false);
   }
 
-  function handleShellTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
-    if (!isMobileViewport || !chromeHidden || sidebarOpen) {
-      mobileTopSwipeStartRef.current = { x: 0, y: 0, tracking: false };
+  function revealMobileChromeFromTopScrollAttempt() {
+    if (!isMobileViewport || !readerAtAbsoluteTop || sidebarOpen) {
       return;
     }
 
-    const touch = event.touches[0];
-    if (!touch) {
-      mobileTopSwipeStartRef.current = { x: 0, y: 0, tracking: false };
-      return;
+    setMobileTopChromeRequested(true);
+    if (mobileTopChromeHideTimerRef.current !== null) {
+      window.clearTimeout(mobileTopChromeHideTimerRef.current);
     }
-
-    mobileTopSwipeStartRef.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      tracking: touch.clientY <= 78
-    };
-  }
-
-  function handleShellTouchMove(event: ReactTouchEvent<HTMLDivElement>) {
-    const swipe = mobileTopSwipeStartRef.current;
-    if (!swipe.tracking) {
-      return;
-    }
-
-    const touch = event.touches[0];
-    if (!touch) {
-      return;
-    }
-
-    const deltaY = touch.clientY - swipe.y;
-    const deltaX = Math.abs(touch.clientX - swipe.x);
-    if (deltaY >= 56 && deltaY > deltaX + 10) {
-      swipe.tracking = false;
-      revealTopBarPeekFromMobileGesture();
-    }
-  }
-
-  function handleShellTouchEnd() {
-    mobileTopSwipeStartRef.current = { x: 0, y: 0, tracking: false };
+    mobileTopChromeHideTimerRef.current = window.setTimeout(() => {
+      setMobileTopChromeRequested(false);
+      mobileTopChromeHideTimerRef.current = null;
+    }, 2800);
   }
 
   function goToPreviousChapter(entryPoint: ChapterEntryPoint = "first", clearSavedProgress = false) {
@@ -1066,21 +1058,6 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
     });
 
     return didNavigate ? null : "No chapter data found for that chapter on this manga.";
-  }
-
-  function handleLongPanelDetected() {
-    if (longPanelPromptedRef.current || mode !== "paginated" || settings.fitMode !== "height-fit") {
-      return;
-    }
-
-    longPanelPromptedRef.current = true;
-    const shouldSwitch = window.confirm(
-      "Long vertical images detected. Switch to Manhwa mode for smoother reading?"
-    );
-
-    if (shouldSwitch) {
-      setMode("scroll");
-    }
   }
 
   function createBookmark() {
@@ -1335,9 +1312,9 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
       ? `${Math.min(currentPage + 1, data.chapter.totalPages)} / ${data.chapter.totalPages}`
       : `${Math.min(scrollPage + 1, data.chapter.totalPages)} / ${data.chapter.totalPages}`;
   const sidebarVisible = sidebarOpen && !chromeHidden;
-  const showMobileChromeToggle =
-    !isMobileViewport || (sidebarOpen && !chromeHidden) || mobileSelectorVisible;
-  const toolbarHidden = chromeHidden && !topBarPeekVisible;
+  const chromePanelOpen = (sidebarOpen || settingsOpen) && !chromeHidden;
+  const showMobileChromeToggle = !isMobileViewport || mobileTopChromeRequested || chromePanelOpen;
+  const toolbarHidden = isMobileViewport ? !(mobileTopChromeRequested || chromePanelOpen) : chromeHidden && !topBarPeekVisible;
 
   const shellStyle = {
     "--reader-bg": settings.backgroundColor,
@@ -1355,10 +1332,6 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
       style={shellStyle}
       onMouseMove={handleShellMouseMove}
       onMouseLeave={handleShellMouseLeave}
-      onTouchStart={handleShellTouchStart}
-      onTouchMove={handleShellTouchMove}
-      onTouchEnd={handleShellTouchEnd}
-      onTouchCancel={handleShellTouchEnd}
     >
       <ReaderToolbar
         hidden={toolbarHidden}
@@ -1419,8 +1392,8 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
               onPageChange={setCurrentPage}
               onReadPreviousChapter={() => goToPreviousChapter("last")}
               onReadNextChapter={() => goToNextChapter("first")}
-              onLongPanelDetected={handleLongPanelDetected}
-              onMobileSelectorVisibilityChange={setMobileSelectorVisible}
+              onReaderAtTopChange={setReaderAtAbsoluteTop}
+              onTopScrollAttempt={revealMobileChromeFromTopScrollAttempt}
             />
           ) : (
             <ScrollReader
@@ -1431,7 +1404,8 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
               onVisiblePageChange={setScrollPage}
               onReadPreviousChapter={() => goToPreviousChapter("last")}
               onReadNextChapter={() => goToNextChapter("first")}
-              onMobileSelectorVisibilityChange={setMobileSelectorVisible}
+              onReaderAtTopChange={setReaderAtAbsoluteTop}
+              onTopScrollAttempt={revealMobileChromeFromTopScrollAttempt}
             />
           )}
         </main>

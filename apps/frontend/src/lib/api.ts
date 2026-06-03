@@ -60,8 +60,8 @@ interface JikanSearchPayload {
 }
 
 const JIKAN_BASE_URL = "https://api.jikan.moe/v4";
-const JIKAN_MAX_RETRIES = 3;
-const JIKAN_MIN_INTERVAL_MS = 420;
+const JIKAN_MAX_RETRIES = 5;
+const JIKAN_MIN_INTERVAL_MS = 1_100;
 const JIKAN_CACHE_TTL_MS = 15 * 60 * 1000;
 const JIKAN_RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
 const jikanFullCache = new Map<string, { expiresAt: number; value: JikanFullData | null }>();
@@ -236,16 +236,18 @@ function buildJikanMangaQueries(options: {
   return Array.from(queries).filter((query) => query.length >= 2);
 }
 
-function computeRetryDelayMs(attempt: number, retryAfterHeader: string | null): number {
+function computeRetryDelayMs(attempt: number, retryAfterHeader: string | null, status?: number): number {
   if (retryAfterHeader) {
     const retryAfterSeconds = Number.parseInt(retryAfterHeader, 10);
     if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
-      return Math.min(8_000, retryAfterSeconds * 1000);
+      return Math.min(65_000, retryAfterSeconds * 1000);
     }
   }
 
-  const exponential = Math.min(8_000, 400 * 2 ** attempt);
-  const jitter = Math.floor(Math.random() * 220);
+  const base = status === 429 ? 2_500 : 500;
+  const cap = status === 429 ? 20_000 : 8_000;
+  const exponential = Math.min(cap, base * 2 ** attempt);
+  const jitter = Math.floor(Math.random() * 250);
   return exponential + jitter;
 }
 
@@ -351,7 +353,7 @@ async function fetchJikanFullByType(
     }
 
     const retryAfter = response.headers.get("retry-after");
-    const retryDelayMs = computeRetryDelayMs(attempt, retryAfter);
+    const retryDelayMs = computeRetryDelayMs(attempt, retryAfter, response.status);
     nextJikanRequestAt = Math.max(nextJikanRequestAt, Date.now() + retryDelayMs);
     await waitFor(retryDelayMs, signal);
   }
@@ -377,7 +379,7 @@ async function fetchJikanMangaSearch(query: string, signal?: AbortSignal): Promi
 
   if (!response.ok) {
     if (JIKAN_RETRYABLE_STATUS.has(response.status)) {
-      const retryDelayMs = computeRetryDelayMs(0, response.headers.get("retry-after"));
+      const retryDelayMs = computeRetryDelayMs(0, response.headers.get("retry-after"), response.status);
       nextJikanRequestAt = Math.max(nextJikanRequestAt, Date.now() + retryDelayMs);
     }
     return [];
@@ -456,6 +458,88 @@ export async function searchMangaRag(query: string, signal?: AbortSignal): Promi
   return parseJson<RagSearchPayload>(response);
 }
 
+export async function searchMangaRagStream(
+  query: string,
+  onUpdate: (payload: RagSearchPayload) => void,
+  signal?: AbortSignal
+): Promise<RagSearchPayload> {
+  const baseUrl = apiPath(`/api/rag/search/stream?q=${encodeURIComponent(query)}`);
+  const response = await fetch(baseUrl, {
+    signal,
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache",
+      Accept: "application/x-ndjson"
+    }
+  });
+
+  if (!response.ok) {
+    return parseJson<RagSearchPayload>(response);
+  }
+
+  if (!response.body) {
+    const payload = await searchMangaRag(query, signal);
+    onUpdate(payload);
+    return payload;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let latest: RagSearchPayload | null = null;
+
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const event = JSON.parse(trimmed) as {
+      type?: string;
+      payload?: RagSearchPayload;
+      error?: string;
+      code?: string;
+    };
+
+    if (event.type === "result" || event.type === "done") {
+      if (event.payload) {
+        latest = event.payload;
+        onUpdate(event.payload);
+      }
+      return;
+    }
+
+    if (event.type === "error") {
+      throw new ApiRequestError(event.error ?? "Smart Search failed.", response.status, event.code);
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      consumeLine(line);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    consumeLine(buffer);
+  }
+
+  if (!latest) {
+    throw new ApiRequestError("Smart Search returned no results.", response.status);
+  }
+
+  return latest;
+}
+
 export async function fetchRagResultLiveMeta(
   malId: number,
   title: string,
@@ -486,6 +570,7 @@ export async function fetchRagResultLiveMeta(
         media_type: candidateType,
         display_type: displayType,
         title: normalizedTitle,
+        title_candidates: collectJikanTitleCandidates(data),
         image_url: extractJikanImageUrl(data.images),
         status: cleanText(data.status) || null,
         chapters: safeNumber(data.chapters),
@@ -562,8 +647,32 @@ export async function fetchJikanMangaChapterCount(
   return normalizedCount;
 }
 
-export async function resolveReadNowByTitle(title: string, signal?: AbortSignal): Promise<ReadNowPayload> {
-  const baseUrl = apiPath(`/api/read-now?title=${encodeURIComponent(title)}`);
+function isLatinReadableTitle(value: string): boolean {
+  const cleaned = cleanText(value);
+  if (!cleaned || cleaned.length < 2) {
+    return false;
+  }
+  if (/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0600-\u06ff]/.test(cleaned)) {
+    return false;
+  }
+  return /[a-zA-Z]/.test(cleaned);
+}
+
+export async function resolveReadNowByTitle(
+  title: string,
+  titleCandidates: string[] = [],
+  signal?: AbortSignal,
+  mediaType?: string
+): Promise<ReadNowPayload> {
+  const latinCandidates = [title, ...titleCandidates].filter(isLatinReadableTitle);
+  const params = new URLSearchParams({ title: latinCandidates[0] ?? title });
+  if (latinCandidates.length > 0) {
+    params.set("titles", JSON.stringify(latinCandidates));
+  }
+  if (mediaType?.trim()) {
+    params.set("media_type", mediaType.trim());
+  }
+  const baseUrl = apiPath(`/api/read-now?${params.toString()}`);
   let response = await fetch(baseUrl, {
     signal,
     cache: "no-store",

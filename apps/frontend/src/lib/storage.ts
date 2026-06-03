@@ -260,6 +260,10 @@ export function getReaderSettings(): ReaderSettings {
       typeof saved.resetPageScrollAfterFlip === "boolean"
         ? saved.resetPageScrollAfterFlip
         : defaults.resetPageScrollAfterFlip,
+    transitionStyle:
+      saved.transitionStyle === "fade" || saved.transitionStyle === "slide" || saved.transitionStyle === "none"
+        ? saved.transitionStyle
+        : defaults.transitionStyle,
     browserHistoryBehavior: saved.browserHistoryBehavior ?? defaults.browserHistoryBehavior
   };
 }

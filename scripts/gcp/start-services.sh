@@ -11,7 +11,11 @@ require_value() {
   local file="$1"
   local key="$2"
   local value
-  value="$(grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
+  if [ -r "${file}" ]; then
+    value="$(grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || true)"
+  else
+    value="$(sudo grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || true)"
+  fi
   if [ -z "${value}" ]; then
     echo "Missing required ${key} in ${file}"
     return 1
@@ -25,7 +29,11 @@ require_any_value() {
   local key
   for key in "$@"; do
     local value
-    value="$(grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '[:space:]')"
+    if [ -r "${file}" ]; then
+      value="$(grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || true)"
+    else
+      value="$(sudo grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || true)"
+    fi
     if [ -n "${value}" ]; then
       return 0
     fi

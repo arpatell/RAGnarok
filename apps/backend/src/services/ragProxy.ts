@@ -65,6 +65,7 @@ interface JikanMediaData {
   title?: string | null;
   title_english?: string | null;
   title_japanese?: string | null;
+  title_synonyms?: string[] | null;
   synopsis?: string | null;
   type?: string | null;
   status?: string | null;
@@ -112,6 +113,7 @@ interface JikanEnrichment {
 
 export interface RagSearchResult {
   title: string;
+  title_candidates?: string[];
   media_type: string;
   display_type: string | null;
   mal_id: number | null;
@@ -146,6 +148,12 @@ export interface RagSearchResponse {
   } | null;
 }
 
+export interface RagSearchProgress {
+  stage: "primary" | "title_alias" | "final";
+  query: string;
+  payload: RagSearchResponse;
+}
+
 export interface RagResultLiveMetadata {
   mal_id: number;
   media_type: string;
@@ -177,21 +185,11 @@ function encodeTitle(value: string): string {
   return encodeURIComponent(value.trim());
 }
 
-function encodeTitleForPath(value: string): string {
-  return value
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/_{2,}/g, "_");
-}
-
 function buildReadOptions(title: string): Record<string, string> {
   const encoded = encodeTitle(title);
-  const underscored = encodeTitleForPath(title);
   return {
-    mangakatana: `https://mangakatana.com/?search=${encoded}`,
-    weebcentral: `https://weebcentral.com/search?text=${encoded}`,
-    mangakakalot: `https://mangakakalot.com/search/story/${underscored}`,
-    assortedscans: `https://assortedscans.com/?s=${encoded}`
+    weebcentral: `https://weebcentral.com/search?text=${encoded}&sort=Best+Match&order=Descending&official=Any&anime=Any&adult=Any&display_mode=Full+Display`,
+    manhwazone: `https://manhwazone.com/search?keyword=${encoded}`
   };
 }
 
@@ -260,6 +258,103 @@ function extractGenres(data: JikanMediaData): string[] {
     .map((genre) => cleanText(genre?.name))
     .filter((genre) => genre.length > 0)
     .slice(0, 8);
+}
+
+function normalizeTitleForMatch(value: string): string {
+  return cleanText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeTitleForMatch(value: string): string[] {
+  return normalizeTitleForMatch(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function titleSimilarityScore(query: string, candidate: string): number {
+  const queryNorm = normalizeTitleForMatch(query);
+  const candidateNorm = normalizeTitleForMatch(candidate);
+  if (!queryNorm || !candidateNorm) {
+    return 0;
+  }
+  if (queryNorm === candidateNorm) {
+    return 1;
+  }
+
+  if (candidateNorm.includes(queryNorm) || queryNorm.includes(candidateNorm)) {
+    return 0.88;
+  }
+
+  const queryTokens = tokenizeTitleForMatch(query);
+  const candidateTokens = tokenizeTitleForMatch(candidate);
+  if (queryTokens.length === 0 || candidateTokens.length === 0) {
+    return 0;
+  }
+
+  const querySet = new Set(queryTokens);
+  const candidateSet = new Set(candidateTokens);
+  let intersection = 0;
+  for (const token of querySet) {
+    if (candidateSet.has(token)) {
+      intersection += 1;
+    }
+  }
+
+  const dice = (2 * intersection) / (querySet.size + candidateSet.size);
+  const queryCoverage = intersection / querySet.size;
+  return Math.max(dice, queryCoverage * 0.85);
+}
+
+function collectJikanTitleCandidates(data: JikanMediaData): string[] {
+  const values = [
+    data.title_english,
+    data.title,
+    data.title_japanese,
+    ...(Array.isArray(data.title_synonyms) ? data.title_synonyms : [])
+  ];
+  const seen = new Set<string>();
+  const titles: string[] = [];
+
+  for (const value of values) {
+    const title = cleanText(value);
+    const key = normalizeTitleForMatch(title);
+    if (!title || !key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    titles.push(title);
+  }
+
+  return titles;
+}
+
+function looksLikeTitleSearch(query: string): boolean {
+  const normalized = cleanText(query);
+  if (!normalized) {
+    return false;
+  }
+
+  if (/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(normalized)) {
+    return true;
+  }
+
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length > 6) {
+    return false;
+  }
+
+  return !/\b(?:find|finds|found|about|where|who|what|when|why|how|recommend|similar|like|with|without|boy|girl|guy|man|woman|mc|main character|character|kills?|dies?|reincarnat|transported|isekai|revenge|overpowered|betrayed|school|vampire|hunter|demon|plot)\b/i.test(normalized);
+}
+
+interface TitleAliasCandidate {
+  title: string;
+  malId: number | null;
+  score: number;
+  candidates: string[];
 }
 
 function delay(ms: number): Promise<void> {
@@ -352,6 +447,60 @@ async function fetchJikanJson<T>(url: string, timeoutMs: number): Promise<T> {
   }
 
   throw lastError ?? new Error("Jikan request failed after retries.");
+}
+
+async function fetchJikanTitleAliasCandidates(query: string): Promise<TitleAliasCandidate[]> {
+  if (!looksLikeTitleSearch(query)) {
+    return [];
+  }
+
+  const mediaTypes: JikanMediaType[] = ["manga", "anime"];
+  const byTitle = new Map<string, TitleAliasCandidate>();
+
+  for (const mediaType of mediaTypes) {
+    try {
+      const url = new URL(`${JIKAN_BASE_URL}/${mediaType}`);
+      url.searchParams.set("q", query);
+      url.searchParams.set("limit", "5");
+      const payload = await fetchJikanJson<{ data?: JikanMediaData[] }>(url.toString(), JIKAN_TIMEOUT_MS);
+      const rows = Array.isArray(payload.data) ? payload.data : [];
+
+      for (const row of rows) {
+        const titles = collectJikanTitleCandidates(row);
+        const score = Math.max(...titles.map((title) => titleSimilarityScore(query, title)), 0);
+        if (score < 0.72) {
+          continue;
+        }
+
+        const preferredTitle =
+          cleanText(row.title_english) ||
+          cleanText(row.title) ||
+          cleanText(row.title_japanese) ||
+          titles[0] ||
+          "";
+        const key = normalizeTitleForMatch(preferredTitle);
+        if (!preferredTitle || !key) {
+          continue;
+        }
+
+        const existing = byTitle.get(key);
+        if (!existing || score > existing.score) {
+          byTitle.set(key, {
+            title: preferredTitle,
+            malId: safeNumber(row.mal_id),
+            score,
+            candidates: titles
+          });
+        }
+      }
+    } catch {
+      // Alias expansion is optional; keep plot/character search behavior intact on failures.
+    }
+  }
+
+  return Array.from(byTitle.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
 }
 
 function parseMediaTypeFromSnippet(snippet: string): JikanMediaType | null {
@@ -701,7 +850,7 @@ function buildFallbackHighlight(result: RagSearchResult, query: string): RagSear
   };
 }
 
-export async function searchMangaRag(query: string): Promise<RagSearchResponse> {
+async function searchMangaRagSingle(query: string): Promise<RagSearchResponse> {
   const normalized = cleanText(query);
   if (!normalized) {
     return {
@@ -791,6 +940,127 @@ export async function searchMangaRag(query: string): Promise<RagSearchResponse> 
     results: enrichedResults,
     highlight
   };
+}
+
+function resultMergeKey(result: RagSearchResult): string {
+  if (result.mal_id !== null) {
+    return `mal:${result.mal_id}`;
+  }
+  return `title:${normalizeTitleForMatch(result.title)}`;
+}
+
+function mergeTitleCandidates(existing: string[] | undefined, next: string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const title of [...(existing ?? []), ...(next ?? [])]) {
+    const cleaned = cleanText(title);
+    const key = normalizeTitleForMatch(cleaned);
+    if (!cleaned || !key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(cleaned);
+  }
+  return merged.slice(0, 16);
+}
+
+function mergeRagResponses(
+  query: string,
+  entries: Array<{ response: RagSearchResponse; alias: TitleAliasCandidate | null }>
+): RagSearchResponse {
+  const resultsByKey = new Map<string, RagSearchResult>();
+
+  for (const entry of entries) {
+    for (const result of entry.response.results) {
+      const key = resultMergeKey(result);
+      const aliasTitleScore = entry.alias
+        ? Math.max(...entry.alias.candidates.map((title) => titleSimilarityScore(title, result.title)), 0)
+        : 0;
+      const aliasScore = aliasTitleScore >= 0.5 ? Math.max(aliasTitleScore, (entry.alias?.score ?? 0) * 0.92) : 0;
+      const nextScore = Math.max(result.score ?? 0, aliasScore);
+      const next: RagSearchResult = {
+        ...result,
+        score: nextScore || result.score,
+        title_candidates: mergeTitleCandidates(result.title_candidates, entry.alias?.candidates)
+      };
+      const existing = resultsByKey.get(key);
+      if (!existing || (next.score ?? 0) > (existing.score ?? 0)) {
+        resultsByKey.set(key, {
+          ...next,
+          title_candidates: mergeTitleCandidates(existing?.title_candidates, next.title_candidates)
+        });
+      }
+    }
+  }
+
+  const results = Array.from(resultsByKey.values())
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    .slice(0, DEFAULT_TOP_K);
+
+  const firstResponse = entries[0]?.response;
+  const first = results[0] ?? null;
+  const highlight =
+    first
+      ? buildFallbackHighlight(first, query)
+      : firstResponse?.highlight ?? null;
+
+  return {
+    query,
+    answer:
+      results.length > 0
+        ? `Found ${results.length} strong matches${entries.length > 1 ? " using title aliases." : "."}`
+        : firstResponse?.answer ?? "No Smart Search matches found.",
+    retrieval_mode: entries.length > 1 ? "hybrid_cache_title_alias" : firstResponse?.retrieval_mode ?? "hybrid_cache",
+    results,
+    highlight
+  };
+}
+
+export async function searchMangaRag(
+  query: string,
+  options: { onProgress?: (progress: RagSearchProgress) => void | Promise<void> } = {}
+): Promise<RagSearchResponse> {
+  const normalized = cleanText(query);
+  if (!normalized) {
+    return searchMangaRagSingle(query);
+  }
+
+  const entries: Array<{ response: RagSearchResponse; alias: TitleAliasCandidate | null }> = [];
+  const primary = await searchMangaRagSingle(normalized);
+  entries.push({ response: primary, alias: null });
+  await options.onProgress?.({
+    stage: "primary",
+    query: normalized,
+    payload: primary
+  });
+
+  const aliases = await fetchJikanTitleAliasCandidates(normalized);
+  const seenQueries = new Set([normalizeTitleForMatch(normalized)]);
+
+  for (const alias of aliases) {
+    const aliasQueryKey = normalizeTitleForMatch(alias.title);
+    if (!aliasQueryKey || seenQueries.has(aliasQueryKey)) {
+      continue;
+    }
+    seenQueries.add(aliasQueryKey);
+
+    const response = await searchMangaRagSingle(alias.title);
+    entries.push({ response, alias });
+    await options.onProgress?.({
+      stage: "title_alias",
+      query: alias.title,
+      payload: mergeRagResponses(normalized, entries)
+    });
+  }
+
+  const finalPayload = mergeRagResponses(normalized, entries);
+  await options.onProgress?.({
+    stage: "final",
+    query: normalized,
+    payload: finalPayload
+  });
+
+  return finalPayload;
 }
 
 export async function fetchRagResultLiveMetadata(

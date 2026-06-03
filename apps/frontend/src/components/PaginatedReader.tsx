@@ -10,8 +10,9 @@ interface PaginatedReaderProps {
   onPageChange: (nextPage: number) => void;
   onReadNextChapter: () => void;
   onReadPreviousChapter: () => void;
-  onLongPanelDetected: () => void;
   onMobileSelectorVisibilityChange?: (visible: boolean) => void;
+  onReaderAtTopChange?: (atTop: boolean) => void;
+  onTopScrollAttempt?: () => void;
 }
 
 function normalizePanelStyle(settings: ReaderSettings): CSSProperties {
@@ -109,8 +110,9 @@ export function PaginatedReader({
   onPageChange,
   onReadNextChapter,
   onReadPreviousChapter,
-  onLongPanelDetected,
-  onMobileSelectorVisibilityChange
+  onMobileSelectorVisibilityChange,
+  onReaderAtTopChange,
+  onTopScrollAttempt
 }: PaginatedReaderProps) {
   const [failed, setFailed] = useState<Set<number>>(new Set());
   const [retryVersion, setRetryVersion] = useState<Record<number, number>>({});
@@ -120,7 +122,7 @@ export function PaginatedReader({
   const [selectorVisible, setSelectorVisible] = useState(false);
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
-  const touchStartEdgeRef = useRef(false);
+  const touchStartBottomRef = useRef(false);
   const touchSelectorOpenRef = useRef(false);
   const suppressNextClickRef = useRef(false);
   const retryTimersRef = useRef<Map<number, number>>(new Map());
@@ -211,9 +213,13 @@ export function PaginatedReader({
   }
 
   function handlePageFlip(nextPage: number) {
+    const scrollX = typeof window !== "undefined" ? window.scrollX : 0;
+    const scrollY = typeof window !== "undefined" ? window.scrollY : 0;
     onPageChange(nextPage);
-    if (settings.resetPageScrollAfterFlip) {
-      window.scrollTo({ top: 0, behavior: "auto" });
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ left: scrollX, top: scrollY, behavior: "auto" });
+      });
     }
   }
 
@@ -321,19 +327,11 @@ export function PaginatedReader({
   }
 
   function handleTouchStart(event: React.TouchEvent<HTMLDivElement>) {
-    if (!settings.enableSwipeGestures) {
-      touchStartX.current = null;
-      touchStartY.current = null;
-      touchStartEdgeRef.current = false;
-      touchSelectorOpenRef.current = false;
-      return;
-    }
-
     const target = event.target as HTMLElement | null;
     if (target?.closest(".vertical-page-selector")) {
       touchStartX.current = null;
       touchStartY.current = null;
-      touchStartEdgeRef.current = false;
+      touchStartBottomRef.current = false;
       touchSelectorOpenRef.current = false;
       return;
     }
@@ -343,16 +341,12 @@ export function PaginatedReader({
     const touchX = touch ? touch.clientX - bounds.left : null;
     touchStartX.current = touchX;
     touchStartY.current = touch?.clientY ?? null;
-    touchStartEdgeRef.current = Boolean(touchX !== null && touchX <= 22);
+    touchStartBottomRef.current = Boolean(touch && bounds.bottom - touch.clientY <= 34);
     touchSelectorOpenRef.current = false;
   }
 
   function handleTouchMove(event: React.TouchEvent<HTMLDivElement>) {
-    if (!settings.enableSwipeGestures || touchStartX.current === null || touchStartY.current === null) {
-      return;
-    }
-
-    if (typeof window === "undefined" || window.innerWidth > 1080 || selectorPinned || !touchStartEdgeRef.current) {
+    if (touchStartX.current === null || touchStartY.current === null) {
       return;
     }
 
@@ -361,13 +355,26 @@ export function PaginatedReader({
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const touchX = touch.clientX - bounds.left;
+    if (typeof window !== "undefined" && window.innerWidth <= 1080 && window.scrollY <= 0) {
+      const pullDown = touch.clientY - touchStartY.current;
+      const horizontalMovement = Math.abs(touch.clientX - touchStartX.current);
+      if (pullDown > 42 && horizontalMovement < 56) {
+        onTopScrollAttempt?.();
+      }
+    }
 
-    const deltaX = touchX - touchStartX.current;
-    const deltaY = Math.abs(touch.clientY - touchStartY.current);
+    if (!settings.enableSwipeGestures) {
+      return;
+    }
 
-    if (deltaX > 56 && deltaY < 30 && deltaX > deltaY * 1.8) {
+    if (typeof window === "undefined" || window.innerWidth > 1080 || selectorPinned || !touchStartBottomRef.current) {
+      return;
+    }
+
+    const deltaX = Math.abs(touch.clientX - touchStartX.current);
+    const deltaY = touch.clientY - touchStartY.current;
+
+    if (deltaY < -42 && deltaX < 52) {
       touchSelectorOpenRef.current = true;
       suppressNextClickRef.current = true;
       setSelectorVisible(true);
@@ -376,10 +383,10 @@ export function PaginatedReader({
   }
 
   function handleTouchEnd(event: React.TouchEvent<HTMLDivElement>) {
-    if (!settings.enableSwipeGestures || touchStartX.current === null) {
+    if (touchStartX.current === null) {
       touchStartX.current = null;
       touchStartY.current = null;
-      touchStartEdgeRef.current = false;
+      touchStartBottomRef.current = false;
       touchSelectorOpenRef.current = false;
       return;
     }
@@ -387,7 +394,7 @@ export function PaginatedReader({
     if (touchSelectorOpenRef.current) {
       touchStartX.current = null;
       touchStartY.current = null;
-      touchStartEdgeRef.current = false;
+      touchStartBottomRef.current = false;
       touchSelectorOpenRef.current = false;
       return;
     }
@@ -401,7 +408,7 @@ export function PaginatedReader({
 
     touchStartX.current = null;
     touchStartY.current = null;
-    touchStartEdgeRef.current = false;
+    touchStartBottomRef.current = false;
 
     if (Math.abs(delta) < threshold) {
       return;
@@ -525,8 +532,33 @@ export function PaginatedReader({
       return;
     }
 
+    if (!settings.enableSwipeGestures) {
+      touchStartX.current = null;
+      touchStartY.current = null;
+      touchStartBottomRef.current = false;
+      touchSelectorOpenRef.current = false;
+      return;
+    }
+
     return () => onMobileSelectorVisibilityChange(false);
   }, [onMobileSelectorVisibilityChange]);
+
+  useEffect(() => {
+    if (!onReaderAtTopChange || typeof window === "undefined") {
+      return;
+    }
+
+    const report = () => onReaderAtTopChange(window.scrollY <= 0);
+    report();
+    window.addEventListener("scroll", report, { passive: true });
+    return () => window.removeEventListener("scroll", report);
+  }, [onReaderAtTopChange]);
+
+  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
+    if (typeof window !== "undefined" && window.innerWidth <= 1080 && window.scrollY <= 0 && event.deltaY < 0) {
+      onTopScrollAttempt?.();
+    }
+  }
 
   useEffect(() => {
     if (!showSelector || selectorPinned || !isMobileViewport()) {
@@ -554,13 +586,16 @@ export function PaginatedReader({
 
   return (
     <section
-      className={`paginated-reader transition-${settings.transitionStyle}`}
+      className={`paginated-reader transition-${settings.transitionStyle} ${showSelector ? "selector-visible" : ""} ${
+        selectorPinned ? "selector-pinned" : ""
+      }`}
       onClick={handleClick}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onWheel={handleWheel}
       aria-label="Paginated manga reader"
     >
       <aside
@@ -658,15 +693,6 @@ export function PaginatedReader({
                     });
                   }
 
-                  if (settings.fitMode !== "height-fit") {
-                    return;
-                  }
-
-                  const image = event.currentTarget;
-                  const ratio = image.naturalHeight / Math.max(1, image.naturalWidth);
-                  if (Number.isFinite(ratio) && ratio >= 2.2) {
-                    onLongPanelDetected();
-                  }
                 }}
                 onError={() => {
                   setFailed((prev) => {

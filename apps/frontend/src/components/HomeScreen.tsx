@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchRagResultLiveMeta, relayImageUrl, resolveReadNowByTitle, searchMangaRag } from "../lib/api";
+import { createPortal } from "react-dom";
+import { fetchRagResultLiveMeta, relayImageUrl, resolveReadNowByTitle, searchMangaRagStream } from "../lib/api";
 import type { FavoriteEntry, HistoryEntry, RagSearchResult } from "../types";
 
 interface HomeScreenProps {
@@ -13,6 +14,56 @@ interface HomeScreenProps {
 
 type InputMode = "smart" | "url";
 type LibraryTab = "recents" | "favorites";
+
+const KOFI_URL = "https://ko-fi.com/phos174";
+const LIVE_META_RETRY_WINDOW_MS = 65_000;
+const LIVE_META_RETRY_PASS_DELAY_MS = 2_500;
+const LIVE_META_BETWEEN_CARD_DELAY_MS = 250;
+
+const CRYPTO_WALLETS = [
+  {
+    id: "sol",
+    label: "SOL",
+    icon: "SOL",
+    address: "8Vs3NX3pN7M7CjmgM6tENgef1LfJLHkWLn6SK3oPEX9r"
+  },
+  {
+    id: "eth",
+    label: "ETH",
+    icon: "ETH",
+    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
+  },
+  {
+    id: "btc",
+    label: "BTC",
+    icon: "BTC",
+    address: "bc1p2l627u3gwyj55pnpn4pkrehvvrlwm6y74cnx006ztdnkut6vhtns0fy2c8"
+  },
+  {
+    id: "base",
+    label: "BASE",
+    icon: "BASE",
+    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
+  },
+  {
+    id: "monad",
+    label: "MONAD",
+    icon: "MON",
+    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
+  },
+  {
+    id: "sui",
+    label: "SUI",
+    icon: "SUI",
+    address: "0xbe1bb13a1bbe47a5948c9c190d32dc70984fffd43fc128428fe67ac3dc11c4ba"
+  },
+  {
+    id: "polygon",
+    label: "POLYGON",
+    icon: "POLY",
+    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
+  }
+];
 
 function toSeriesKey(value: string): string {
   return value.trim().toLowerCase();
@@ -127,6 +178,9 @@ export function HomeScreen({
   const [isSmartSearching, setIsSmartSearching] = useState(false);
   const [smartError, setSmartError] = useState<string | null>(null);
   const [hasSmartSearched, setHasSmartSearched] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportShowCrypto, setSupportShowCrypto] = useState(false);
+  const [supportCopyStatus, setSupportCopyStatus] = useState<string | null>(null);
 
   const [readNowLoadingKey, setReadNowLoadingKey] = useState<string | null>(null);
   const [readNowError, setReadNowError] = useState<string | null>(null);
@@ -157,12 +211,6 @@ export function HomeScreen({
     setUrl(initialUrl);
   }, [initialUrl]);
 
-  useEffect(() => {
-    if (activeTab === "favorites" && favorites.length === 0) {
-      setActiveTab("recents");
-    }
-  }, [activeTab, favorites.length]);
-
   const runSmartSearch = useCallback(async (query: string) => {
     if (!query.trim()) {
       setSmartResults([]);
@@ -180,11 +228,31 @@ export function HomeScreen({
     smartAbortRef.current = controller;
 
     setIsSmartSearching(true);
+    setSmartResults([]);
+    setSmartAnswer("");
+    setLastSearchQuery(query.trim());
+    setSmartHighlight(null);
+    setHasSmartSearched(true);
     setSmartError(null);
     setReadNowError(null);
 
     try {
-      const payload = await searchMangaRag(query.trim(), controller.signal);
+      const payload = await searchMangaRagStream(
+        query.trim(),
+        (streamedPayload) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          const streamedResults = streamedPayload.results.slice(0, 10);
+          setSmartResults(streamedResults);
+          setSmartAnswer(streamedPayload.answer);
+          setLastSearchQuery(streamedPayload.query.trim() || query.trim());
+          setSmartHighlight(streamedPayload.highlight);
+          setHasSmartSearched(true);
+        },
+        controller.signal
+      );
       const topResults = payload.results.slice(0, 10);
       setSmartResults(topResults);
       setSmartAnswer(payload.answer);
@@ -197,56 +265,74 @@ export function HomeScreen({
       liveMetaAbortRef.current = metaController;
 
       void (async () => {
-        for (const [index, result] of topResults.entries()) {
-          if (metaController.signal.aborted) {
-            return;
-          }
+        const pending = new Map(
+          topResults
+            .filter((result) => result.mal_id !== null && !result.image_url?.trim())
+            .map((result) => [`${result.mal_id}:${result.title}`, result])
+        );
+        const deadlineAt = Date.now() + LIVE_META_RETRY_WINDOW_MS;
 
-          if (result.mal_id === null) {
-            continue;
-          }
-
-          try {
-            if (index > 0) {
-              // Pace browser-side Jikan requests to reduce 429s while still updating progressively.
-              await waitFor(360, metaController.signal);
-            }
-
-            const liveMeta = await fetchRagResultLiveMeta(
-              result.mal_id,
-              result.title,
-              result.media_type,
-              metaController.signal
-            );
-
+        while (pending.size > 0 && Date.now() < deadlineAt) {
+          for (const [pendingKey, result] of Array.from(pending.entries())) {
             if (metaController.signal.aborted) {
               return;
             }
 
-            setSmartResults((current) =>
-              current.map((row) => {
-                if (row.mal_id !== liveMeta.mal_id) {
-                  return row;
-                }
-
-                return {
-                  ...row,
-                  media_type: liveMeta.media_type || row.media_type,
-                  display_type: liveMeta.display_type || row.display_type,
-                  image_url: liveMeta.image_url || row.image_url,
-                  status: liveMeta.status ?? row.status,
-                  chapters: liveMeta.chapters ?? row.chapters,
-                  volumes: liveMeta.volumes ?? row.volumes,
-                  episodes: liveMeta.episodes ?? row.episodes,
-                  jikan_score: liveMeta.jikan_score ?? row.jikan_score
-                };
-              })
-            );
-          } catch (error) {
-            if (error instanceof Error && error.name === "AbortError") {
-              return;
+            if (result.mal_id === null) {
+              pending.delete(pendingKey);
+              continue;
             }
-            // Best-effort enrichment only; keep existing card content when a live request fails.
+
+            try {
+              const liveMeta = await fetchRagResultLiveMeta(
+                result.mal_id,
+                result.title,
+                result.media_type,
+                metaController.signal
+              );
+
+              if (metaController.signal.aborted) {
+                return;
+              }
+
+              setSmartResults((current) =>
+                current.map((row) => {
+                  if (row.mal_id !== liveMeta.mal_id) {
+                    return row;
+                  }
+
+                  return {
+                    ...row,
+                    media_type: liveMeta.media_type || row.media_type,
+                    display_type: liveMeta.display_type || row.display_type,
+                    title_candidates: liveMeta.title_candidates.length > 0 ? liveMeta.title_candidates : row.title_candidates,
+                    image_url: liveMeta.image_url || row.image_url,
+                    status: liveMeta.status ?? row.status,
+                    chapters: liveMeta.chapters ?? row.chapters,
+                    volumes: liveMeta.volumes ?? row.volumes,
+                    episodes: liveMeta.episodes ?? row.episodes,
+                    jikan_score: liveMeta.jikan_score ?? row.jikan_score
+                  };
+                })
+              );
+
+              if (liveMeta.image_url?.trim()) {
+                pending.delete(pendingKey);
+              }
+            } catch (error) {
+              if (error instanceof Error && error.name === "AbortError") {
+                return;
+              }
+              // Keep this card in the queue; transient Jikan failures and 429s are retried below.
+            }
+
+            if (pending.size > 0) {
+              await waitFor(LIVE_META_BETWEEN_CARD_DELAY_MS, metaController.signal);
+            }
+          }
+
+          if (pending.size > 0 && Date.now() < deadlineAt) {
+            await waitFor(LIVE_META_RETRY_PASS_DELAY_MS, metaController.signal);
           }
         }
       })();
@@ -274,10 +360,35 @@ export function HomeScreen({
       setReadNowLoadingKey(key);
 
       try {
-        const resolved = await resolveReadNowByTitle(title, controller.signal);
+        let titleCandidates = [title, ...(result.title_candidates ?? [])];
+        if (result.mal_id !== null) {
+          try {
+            const liveMeta = await fetchRagResultLiveMeta(
+              result.mal_id,
+              result.title,
+              result.media_type,
+              controller.signal
+            );
+            titleCandidates = [title, liveMeta.title, ...liveMeta.title_candidates, ...(result.title_candidates ?? [])];
+          } catch (error) {
+            if (error instanceof Error && error.name === "AbortError") {
+              throw error;
+            }
+            // Read Now can still proceed with the stored RAG title when Jikan aliases are unavailable.
+          }
+        }
+
+        const resolved = await resolveReadNowByTitle(
+          title,
+          titleCandidates,
+          controller.signal,
+          result.media_type || result.display_type || ""
+        );
         const chapterUrl = resolved.chapterUrl.trim();
         if (!chapterUrl) {
-          throw new Error(`Could not find a readable chapter for "${title}" on MangaKatana.`);
+          throw new Error(
+            `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching for a dedicated website hosting this manga/manhwa.`
+          );
         }
         onSubmitUrl(chapterUrl);
       } catch (error) {
@@ -287,7 +398,7 @@ export function HomeScreen({
         const message =
           error instanceof Error && error.message.trim().length > 0
             ? error.message
-            : `Could not find "${title}" on MangaKatana right now.`;
+            : `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching for a dedicated website hosting this manga/manhwa.`;
         setReadNowError(message);
       } finally {
         setReadNowLoadingKey((current) => (current === key ? null : current));
@@ -315,13 +426,119 @@ export function HomeScreen({
     onSubmitUrl(url.trim());
   }
 
+  async function copyCryptoAddress(label: string, address: string) {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(address);
+        setSupportCopyStatus(`${label} address copied.`);
+        return;
+      }
+    } catch {
+      // Fall back to execCommand below.
+    }
+
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = address;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setSupportCopyStatus(copied ? `${label} address copied.` : "Copy failed. Please copy manually.");
+    } catch {
+      setSupportCopyStatus("Copy failed. Please copy manually.");
+    }
+  }
+
   const showSmartResults =
     inputMode === "smart" &&
     (isSmartSearching || smartResults.length > 0 || (hasSmartSearched && !isSmartSearching) || Boolean(smartError));
+  const supportModal = supportOpen ? (
+    <div
+      className="coffee-modal-backdrop"
+      onClick={() => setSupportOpen(false)}
+      role="presentation"
+    >
+      <div
+        className="coffee-modal home-support-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Support developer"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h4>Buy Developer a Coffee!</h4>
+        <p className="muted">
+          Thanks for using my site. If you wanted to support development, feel free to use any of these methods, and
+          don&rsquo;t forget to leave any feedback or ideas.
+        </p>
+        <div className="home-support-modal-actions">
+          <a className="primary" href={KOFI_URL} target="_blank" rel="noreferrer">
+            Ko-fi
+          </a>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              setSupportCopyStatus(null);
+              setSupportShowCrypto((current) => !current);
+            }}
+            aria-expanded={supportShowCrypto}
+          >
+            Crypto
+          </button>
+        </div>
+        {supportShowCrypto ? (
+          <ul className="coffee-wallet-list" aria-label="Crypto wallet addresses">
+            {CRYPTO_WALLETS.map((wallet) => (
+              <li key={wallet.id} className="coffee-wallet-item">
+                <div className="wallet-network">
+                  <span className="wallet-icon" aria-hidden="true">{wallet.icon}</span>
+                  <strong>{wallet.label}</strong>
+                </div>
+                <div className="coffee-address-row wallet-address-row">
+                  <input type="text" readOnly value={wallet.address} aria-label={`${wallet.label} address`} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void copyCryptoAddress(wallet.label, wallet.address);
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {supportCopyStatus ? <p className="muted">{supportCopyStatus}</p> : null}
+        <button type="button" className="ghost" onClick={() => setSupportOpen(false)}>
+          Close
+        </button>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="home-shell">
       <div className="home-gradient" />
+      <button
+        type="button"
+        className="home-support-button"
+        aria-label="Support development"
+        title="Support development"
+        onClick={() => {
+          setSupportCopyStatus(null);
+          setSupportShowCrypto(false);
+          setSupportOpen(true);
+        }}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 7h13v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V7zm13 2h1a2 2 0 0 1 0 4h-1V9zm-9 12h8M7 4h2M11 4h2" />
+        </svg>
+      </button>
       <main className="home-content">
         <p className="home-kicker">AI-Powered Discovery &amp; Universal Manga Reader</p>
         <h1>RAGnarok🌀</h1>
@@ -397,19 +614,26 @@ export function HomeScreen({
         {showSmartResults && (
           <section className="search-results-section" aria-label="Smart Search results">
             {isSmartSearching ? (
-              <div className="search-results-grid">
-                {[1, 2, 3, 4].map((n) => (
-                  <div key={`smart-${n}`} className="search-result-card search-skeleton" aria-hidden="true" />
-                ))}
+              <div className="search-loading-panel" role="status" aria-live="polite">
+                <div className="search-loading-mark" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <div>
+                  <p>Searching...</p>
+                  <small>Matching titles, plots, and aliases.</small>
+                </div>
               </div>
-            ) : smartError ? (
+            ) : null}
+            {smartError && !isSmartSearching ? (
               <p className="muted search-empty">{smartError}</p>
-            ) : smartResults.length === 0 ? (
+            ) : smartResults.length === 0 && !isSmartSearching ? (
               <p className="muted search-empty">
                 No Smart Search matches found for &ldquo;{lastSearchQuery || smartQuery}&rdquo;. Try adding character names,
                 abilities, or setting clues.
               </p>
-            ) : (
+            ) : smartResults.length > 0 ? (
               <>
                 {smartHighlight ? (
                   <article className="rag-answer-card">
@@ -499,9 +723,13 @@ export function HomeScreen({
                     );
                   })}
                 </div>
-                {readNowError ? <p className="muted search-empty">{readNowError}</p> : null}
+                {readNowError ? (
+                  <p className="search-read-now-error" role="alert">
+                    {readNowError}
+                  </p>
+                ) : null}
               </>
-            )}
+            ) : null}
           </section>
         )}
 
@@ -527,7 +755,7 @@ export function HomeScreen({
           </div>
           <p className="muted">
             <strong>Search Results:</strong> Automated reading is currently optimized to search and fetch directly
-            from MangaKatana.
+            from WeebCentral and ManhwaZone.
           </p>
           <p className="muted">
             <strong>Manual Import:</strong> Our paste feature works with almost any site that publicly exposes image
@@ -618,6 +846,7 @@ export function HomeScreen({
           )}
         </section>
       </main>
+      {supportModal && typeof document !== "undefined" ? createPortal(supportModal, document.body) : null}
     </div>
   );
 }

@@ -3,21 +3,6 @@ import type { Adapter, SupportedAdapterSummary } from "../types.js";
 
 const ADAPTERS: Adapter[] = [
   createSelectorAdapter({
-    id: "mangakatana",
-    displayName: "MangaKatana",
-    domains: ["mangakatana.com"],
-    defaultMode: "paginated",
-    selectors: {
-      title: ["h1.heading", "h1.title", "meta[property='og:title']"],
-      cover: [".cover img", "meta[property='og:image']"],
-      chapterTitle: ["h1.heading", ".chapter-heading", "title"],
-      chapterLinks: [".chapters a", ".chapter-list a", "a[href*='/c']"],
-      panel: ["#imgs img", ".chapter-content img", ".vung-doc img"],
-      genres: ["a[href*='/genre/']", ".genres a"],
-      status: [".d-cell-small-value", ".status"]
-    }
-  }),
-  createSelectorAdapter({
     id: "webtoons",
     displayName: "Webtoons",
     domains: ["webtoons.com"],
@@ -75,6 +60,21 @@ const ADAPTERS: Adapter[] = [
       panel: [".reading-content img", ".entry-content img", ".chapter-content img"],
       genres: [".genres-content a", "a[href*='/genre/']"],
       status: [".post-status .summary-content", ".summary-content", ".status"]
+    }
+  }),
+  createSelectorAdapter({
+    id: "manhwazone",
+    displayName: "ManhwaZone",
+    domains: ["manhwazone.com"],
+    defaultMode: "scroll",
+    selectors: {
+      title: ["h1", "meta[property='og:title']", "title"],
+      cover: ["meta[property='og:image']", ".cover img", ".poster img", "img[alt*='cover' i]"],
+      chapterTitle: ["h1", ".chapter-title", "title"],
+      chapterLinks: ["ol[aria-label='List of chapters'] li a", "a[aria-label^='Read Episode']", "a[href^='/preview/']"],
+      panel: ["main img", "article img", ".chapter-content img", ".reader img", ".prose img", "img[src]"],
+      genres: ["a[href*='/genre']", "a[href*='/tag']", ".genres a"],
+      status: [".status", ".series-status", ".meta-item"]
     }
   }),
   createSelectorAdapter({

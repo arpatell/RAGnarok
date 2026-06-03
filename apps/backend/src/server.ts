@@ -11,7 +11,7 @@ import { isIngestError, IngestError, toErrorPayload } from "./errors.js";
 import { ingestUrl } from "./services/ingest.js";
 import { searchMangaRag } from "./services/ragProxy.js";
 import { buildSuggestions } from "./services/suggestions.js";
-import { resolveMangaKatanaReadNow, searchManga } from "./services/webSearch.js";
+import { resolveDirectReadNow, searchManga } from "./services/webSearch.js";
 
 function loadEnvironment(): void {
   const cwd = process.cwd();
@@ -303,11 +303,31 @@ app.get("/api/search", searchLimiter, async (req, res, next) => {
 app.get("/api/read-now", searchLimiter, async (req, res, next) => {
   try {
     const title = z.string().min(1).max(220).parse(req.query.title).trim();
-    const resolved = await resolveMangaKatanaReadNow(title);
+    const rawTitles = typeof req.query.titles === "string" ? req.query.titles : "";
+    const titleCandidates = (() => {
+      if (!rawTitles) {
+        return [title];
+      }
+
+      try {
+        const parsed = JSON.parse(rawTitles) as unknown;
+        if (Array.isArray(parsed)) {
+          return [title, ...parsed.filter((value): value is string => typeof value === "string")];
+        }
+      } catch {
+        // Fall back to the primary title when optional candidates are malformed.
+      }
+
+      return [title];
+    })();
+
+    const mediaHint = typeof req.query.media_type === "string" ? req.query.media_type : "";
+    const preferManhwa = /manhwa/i.test(mediaHint);
+    const resolved = await resolveDirectReadNow(titleCandidates, { preferManhwa });
     if (!resolved) {
       throw new IngestError(
         "INGEST_FAILED",
-        `Could not find a readable MangaKatana Chapter 1 match for "${title}".`,
+        `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching for a dedicated website hosting this manga/manhwa.`,
         404
       );
     }
@@ -328,6 +348,50 @@ app.get("/api/rag/search", searchLimiter, async (req, res, next) => {
     res.json(ragResult);
   } catch (error) {
     next(error);
+  }
+});
+
+app.get("/api/rag/search/stream", searchLimiter, async (req, res) => {
+  let lastWriteAt = 0;
+
+  const writeLine = (payload: unknown) => {
+    res.write(`${JSON.stringify(payload)}\n`);
+  };
+
+  try {
+    const q = z.string().min(1).max(400).parse(req.query.q).trim();
+    res.status(200);
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+
+    const result = await searchMangaRag(q, {
+      onProgress: async (progress) => {
+        const now = Date.now();
+        if (progress.stage !== "final" && now - lastWriteAt < 650) {
+          return;
+        }
+        lastWriteAt = now;
+        writeLine({ type: "result", ...progress });
+      }
+    });
+
+    writeLine({ type: "done", payload: result });
+    res.end();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Smart Search failed.";
+    if (!res.headersSent) {
+      res.status(500);
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    }
+    writeLine({
+      type: "error",
+      error: message,
+      code: isIngestError(error) ? error.code : "INGEST_FAILED"
+    });
+    res.end();
   }
 });
 
