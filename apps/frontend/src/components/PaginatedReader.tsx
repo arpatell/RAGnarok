@@ -17,31 +17,44 @@ interface PaginatedReaderProps {
 
 function normalizePanelStyle(settings: ReaderSettings): CSSProperties {
   const zoomFactor = settings.zoomPercent / 100;
+  const zoomPercent = Math.min(200, Math.max(50, settings.zoomPercent));
+  const heightOffsetPx = Math.round(120 * zoomFactor);
 
   switch (settings.fitMode) {
     case "height-fit":
       return {
-        height: "calc(100vh - 120px)",
+        height: `calc(${zoomPercent}vh - ${heightOffsetPx}px)`,
         width: "auto",
-        maxWidth: `${Math.max(100, settings.zoomPercent)}%`
+        maxWidth: "none",
+        maxHeight: "none",
+        flexShrink: 0
       };
     case "original":
       return {
         width: "auto",
         height: "auto",
+        maxWidth: "none",
+        maxHeight: "none",
+        flexShrink: 0,
         transform: `scale(${zoomFactor})`,
         transformOrigin: "top center"
       };
     case "custom":
       return {
-        width: `${settings.zoomPercent}%`,
-        height: "auto"
+        width: `${zoomPercent}%`,
+        height: "auto",
+        maxWidth: "none",
+        maxHeight: "none",
+        flexShrink: 0
       };
     case "width-fit":
     default:
       return {
-        width: `${Math.max(60, settings.zoomPercent)}%`,
-        height: "auto"
+        width: `${Math.max(60, zoomPercent)}%`,
+        height: "auto",
+        maxWidth: "none",
+        maxHeight: "none",
+        flexShrink: 0
       };
   }
 }

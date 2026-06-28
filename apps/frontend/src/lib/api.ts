@@ -59,6 +59,22 @@ interface JikanSearchPayload {
   data?: JikanFullData[];
 }
 
+interface JikanRecommendationEntry {
+  mal_id?: number;
+  title?: string | null;
+  url?: string | null;
+  images?: JikanFullData["images"];
+}
+
+interface JikanRecommendationRow {
+  entry?: JikanRecommendationEntry;
+  votes?: number | null;
+}
+
+interface JikanRecommendationsPayload {
+  data?: JikanRecommendationRow[];
+}
+
 const JIKAN_BASE_URL = "https://api.jikan.moe/v4";
 const JIKAN_MAX_RETRIES = 5;
 const JIKAN_MIN_INTERVAL_MS = 1_100;
@@ -66,6 +82,7 @@ const JIKAN_CACHE_TTL_MS = 15 * 60 * 1000;
 const JIKAN_RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
 const jikanFullCache = new Map<string, { expiresAt: number; value: JikanFullData | null }>();
 const jikanChapterCountCache = new Map<string, { expiresAt: number; value: number | null }>();
+const jikanRecommendationsCache = new Map<string, { expiresAt: number; value: SuggestionsPayload }>();
 let nextJikanRequestAt = 0;
 const API_BASE_URL = cleanText(import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 
@@ -645,6 +662,104 @@ export async function fetchJikanMangaChapterCount(
   }
 
   return normalizedCount;
+}
+
+async function resolveJikanMangaIdByTitle(seriesTitle: string, signal?: AbortSignal): Promise<number | null> {
+  const queries = buildJikanMangaQueries({ seriesTitle });
+  let best: { data: JikanFullData; score: number } | null = null;
+
+  for (const query of queries) {
+    const candidates = await fetchJikanMangaSearch(query, signal);
+    for (const candidate of candidates) {
+      const score = scoreJikanMangaCandidate(candidate, query);
+      if (!Number.isFinite(score) || score > 2.5) {
+        continue;
+      }
+
+      if (!best || score < best.score) {
+        best = { data: candidate, score };
+      }
+    }
+
+    if (best?.score === 0) {
+      break;
+    }
+  }
+
+  return best ? safeNumber(best.data.mal_id) : null;
+}
+
+export async function fetchJikanMangaRecommendations(
+  seriesTitle: string,
+  signal?: AbortSignal
+): Promise<SuggestionsPayload> {
+  const normalizedTitle = normalizeTitleForMatch(seriesTitle);
+  const cached = jikanRecommendationsCache.get(normalizedTitle);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const malId = await resolveJikanMangaIdByTitle(seriesTitle, signal);
+  if (malId === null) {
+    const empty = { alternatives: [], similarSeries: [], trending: [] };
+    jikanRecommendationsCache.set(normalizedTitle, {
+      expiresAt: Date.now() + JIKAN_CACHE_TTL_MS,
+      value: empty
+    });
+    return empty;
+  }
+
+  await waitForJikanSlot(signal);
+  const response = await fetch(`${JIKAN_BASE_URL}/manga/${malId}/recommendations`, {
+    signal,
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      "Cache-Control": "no-cache"
+    }
+  });
+
+  if (!response.ok) {
+    if (JIKAN_RETRYABLE_STATUS.has(response.status)) {
+      const retryDelayMs = computeRetryDelayMs(0, response.headers.get("retry-after"), response.status);
+      nextJikanRequestAt = Math.max(nextJikanRequestAt, Date.now() + retryDelayMs);
+    }
+    throw new Error(`Jikan manga/${malId}/recommendations failed (${response.status}).`);
+  }
+
+  const payload = (await response.json()) as JikanRecommendationsPayload;
+  const seen = new Set<string>();
+  const similarSeries = (Array.isArray(payload.data) ? payload.data : [])
+    .map((row) => {
+      const title = cleanText(row.entry?.title);
+      const key = normalizeTitleForMatch(title);
+      if (!title || !key || seen.has(key)) {
+        return null;
+      }
+      seen.add(key);
+      return {
+        title,
+        coverUrl: extractJikanImageUrl(row.entry?.images),
+        chapterCount: 0,
+        votes: safeNumber(row.votes) ?? undefined,
+        malId: safeNumber(row.entry?.mal_id) ?? undefined,
+        url: cleanText(row.entry?.url) || undefined
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .slice(0, 5);
+
+  const result: SuggestionsPayload = {
+    alternatives: [],
+    similarSeries,
+    trending: []
+  };
+
+  jikanRecommendationsCache.set(normalizedTitle, {
+    expiresAt: Date.now() + JIKAN_CACHE_TTL_MS,
+    value: result
+  });
+  return result;
 }
 
 function isLatinReadableTitle(value: string): boolean {

@@ -23,6 +23,18 @@ require_value() {
   return 0
 }
 
+read_env_value() {
+  local file="$1"
+  local key="$2"
+  local value
+  if [ -r "${file}" ]; then
+    value="$(grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || true)"
+  else
+    value="$(sudo grep -E "^${key}=" "${file}" 2>/dev/null | tail -1 | cut -d'=' -f2- | tr -d '[:space:]' || true)"
+  fi
+  echo "${value}"
+}
+
 require_any_value() {
   local file="$1"
   shift
@@ -53,7 +65,9 @@ require_any_value "${BACKEND_ENV_FILE}" "CEREBRAS_API_KEY" "OPENAI_API_KEY"
 require_value "${RAG_ENV_FILE}" "PINECONE_API_KEY"
 require_value "${RAG_ENV_FILE}" "PINECONE_INDEX"
 require_value "${RAG_ENV_FILE}" "PINECONE_NAMESPACE"
-require_value "${RAG_ENV_FILE}" "CEREBRAS_API_KEY"
+if [ "$(read_env_value "${RAG_ENV_FILE}" "RAG_LLM_RERANK_ENABLED")" = "1" ]; then
+  require_value "${RAG_ENV_FILE}" "CEREBRAS_API_KEY"
+fi
 
 echo "Restarting services..."
 sudo systemctl daemon-reload

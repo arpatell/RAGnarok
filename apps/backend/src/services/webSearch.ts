@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { LRUCache } from "lru-cache";
 import { resolveAdapterForUrl } from "../adapters/index.js";
 import { sortChapterList } from "./chapterSort.js";
 import { fetchChapterHtml } from "./fetchProxy.js";
@@ -87,13 +88,20 @@ interface SourceReadNowMatch {
 
 const WEEBCENTRAL_BASE_URL = "https://weebcentral.com";
 const WEEBCENTRAL_DOMAIN = "weebcentral.com";
-const WEEBCENTRAL_SEARCH_TIMEOUT_MS = 12_000;
+const WEEBCENTRAL_SEARCH_TIMEOUT_MS = Math.max(1_000, Number.parseInt(process.env.WEEBCENTRAL_SEARCH_TIMEOUT_MS ?? "2500", 10));
 const WEEBCENTRAL_SEARCH_LIMIT = 24;
 const MANHWAZONE_BASE_URL = "https://manhwazone.com";
 const MANHWAZONE_DOMAIN = "manhwazone.com";
-const MANHWAZONE_SEARCH_TIMEOUT_MS = 12_000;
+const MANHWAZONE_SEARCH_TIMEOUT_MS = Math.max(1_000, Number.parseInt(process.env.MANHWAZONE_SEARCH_TIMEOUT_MS ?? "2500", 10));
 const MANHWAZONE_SEARCH_LIMIT = 24;
 const MIN_READ_NOW_TITLE_SCORE = 0.58;
+const READ_NOW_TIMEOUT_MS = Math.max(1_500, Number.parseInt(process.env.READ_NOW_TIMEOUT_MS ?? "4000", 10));
+const READ_NOW_SERIES_RESOLVE_TIMEOUT_MS = Math.max(
+  800,
+  Number.parseInt(process.env.READ_NOW_SERIES_RESOLVE_TIMEOUT_MS ?? "1500", 10)
+);
+const READ_NOW_TITLE_VARIANT_LIMIT = Math.max(1, Number.parseInt(process.env.READ_NOW_TITLE_VARIANT_LIMIT ?? "4", 10));
+const READ_NOW_CACHE_TTL_MS = Math.max(0, Number.parseInt(process.env.READ_NOW_CACHE_TTL_MS ?? "600000", 10));
 
 interface SourceSeriesCandidate {
   url: string;
@@ -104,6 +112,12 @@ interface SourceSeriesCandidate {
 export interface ReadNowResolveOptions {
   preferManhwa?: boolean;
 }
+
+const readNowCache = new LRUCache<string, ReadNowResolution>({
+  max: 500,
+  ttl: READ_NOW_CACHE_TTL_MS
+});
+const inFlightReadNowResolutions = new Map<string, Promise<ReadNowResolution | null>>();
 
 function isLatinReadableTitle(value: string): boolean {
   const cleaned = cleanTitle(value);
@@ -821,13 +835,68 @@ function chooseBestSourceMatch(
   return best && best.score >= minScore ? best : null;
 }
 
-async function resolveWeebCentralReadNowFromTitles(queryTitles: string[]): Promise<ReadNowResolution | null> {
-  const candidates: SourceSeriesCandidate[] = [];
-  for (const queryTitle of queryTitles) {
-    candidates.push(...await fetchWeebCentralSearchSeriesCandidates(queryTitle));
+async function withTimeoutValue<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function firstNonNull<T>(promises: Array<Promise<T | null>>): Promise<T | null> {
+  if (promises.length === 0) {
+    return Promise.resolve(null);
   }
 
-  const selectedMatch = chooseBestSourceMatch(queryTitles, candidates);
+  return new Promise((resolve) => {
+    let remaining = promises.length;
+    let settled = false;
+
+    for (const promise of promises) {
+      promise
+        .then((value) => {
+          if (settled) {
+            return;
+          }
+          if (value) {
+            settled = true;
+            resolve(value);
+            return;
+          }
+          remaining -= 1;
+          if (remaining === 0) {
+            settled = true;
+            resolve(null);
+          }
+        })
+        .catch(() => {
+          if (settled) {
+            return;
+          }
+          remaining -= 1;
+          if (remaining === 0) {
+            settled = true;
+            resolve(null);
+          }
+        });
+    }
+  });
+}
+
+async function resolveWeebCentralReadNowFromTitles(queryTitles: string[]): Promise<ReadNowResolution | null> {
+  const limitedTitles = queryTitles.slice(0, READ_NOW_TITLE_VARIANT_LIMIT);
+  const candidateLists = await Promise.all(limitedTitles.map((queryTitle) => fetchWeebCentralSearchSeriesCandidates(queryTitle)));
+  const candidates = candidateLists.flat();
+
+  const selectedMatch = chooseBestSourceMatch(limitedTitles, candidates);
   if (!selectedMatch) {
     // eslint-disable-next-line no-console
     console.log(`[read-now] weebcentral no loose match candidates=${candidates.length}`);
@@ -837,9 +906,13 @@ async function resolveWeebCentralReadNowFromTitles(queryTitles: string[]): Promi
   // eslint-disable-next-line no-console
   console.log(`[read-now] weebcentral selected title="${selectedMatch.candidate.title}" url=${selectedMatch.candidate.url} score=${selectedMatch.score.toFixed(2)}`);
 
-  const resolved = await resolveFirstWeebCentralChapterFromSeriesUrl(
-    selectedMatch.candidate.url,
-    selectedMatch.candidate.title
+  const resolved = await withTimeoutValue(
+    resolveFirstWeebCentralChapterFromSeriesUrl(
+      selectedMatch.candidate.url,
+      selectedMatch.candidate.title
+    ),
+    READ_NOW_SERIES_RESOLVE_TIMEOUT_MS,
+    null
   );
   if (!resolved) {
     return null;
@@ -855,12 +928,11 @@ async function resolveWeebCentralReadNowFromTitles(queryTitles: string[]): Promi
 }
 
 async function resolveManhwaZoneReadNowFromTitles(queryTitles: string[]): Promise<ReadNowResolution | null> {
-  const candidates: SourceSeriesCandidate[] = [];
-  for (const queryTitle of queryTitles) {
-    candidates.push(...await fetchManhwaZoneSearchSeriesCandidates(queryTitle));
-  }
+  const limitedTitles = queryTitles.slice(0, READ_NOW_TITLE_VARIANT_LIMIT);
+  const candidateLists = await Promise.all(limitedTitles.map((queryTitle) => fetchManhwaZoneSearchSeriesCandidates(queryTitle)));
+  const candidates = candidateLists.flat();
 
-  const selectedMatch = chooseBestSourceMatch(queryTitles, candidates);
+  const selectedMatch = chooseBestSourceMatch(limitedTitles, candidates);
   if (!selectedMatch) {
     // eslint-disable-next-line no-console
     console.log(`[read-now] manhwazone no loose match candidates=${candidates.length}`);
@@ -870,11 +942,8 @@ async function resolveManhwaZoneReadNowFromTitles(queryTitles: string[]): Promis
   // eslint-disable-next-line no-console
   console.log(`[read-now] manhwazone selected title="${selectedMatch.candidate.title}" url=${selectedMatch.candidate.url} score=${selectedMatch.score.toFixed(2)}`);
 
-  let resolved = await resolveFirstManhwaZoneChapterFromSeriesUrl(
-    selectedMatch.candidate.url,
-    selectedMatch.candidate.title
-  );
-  if (!resolved?.chapterUrl && selectedMatch.candidate.firstChapterUrl) {
+  let resolved: { chapterUrl: string; matchedTitle: string } | null = null;
+  if (selectedMatch.candidate.firstChapterUrl) {
     // eslint-disable-next-line no-console
     console.log(
       `[read-now] manhwazone using search preview chapter url=${selectedMatch.candidate.firstChapterUrl}`
@@ -883,6 +952,16 @@ async function resolveManhwaZoneReadNowFromTitles(queryTitles: string[]): Promis
       chapterUrl: selectedMatch.candidate.firstChapterUrl,
       matchedTitle: selectedMatch.candidate.title
     };
+  }
+  if (!resolved?.chapterUrl) {
+    resolved = await withTimeoutValue(
+      resolveFirstManhwaZoneChapterFromSeriesUrl(
+        selectedMatch.candidate.url,
+        selectedMatch.candidate.title
+      ),
+      READ_NOW_SERIES_RESOLVE_TIMEOUT_MS,
+      null
+    );
   }
   if (!resolved) {
     return null;
@@ -901,16 +980,47 @@ export async function resolveDirectReadNow(
   titles: string[] | string,
   options: ReadNowResolveOptions = {}
 ): Promise<ReadNowResolution | null> {
-  void options;
   const queryTitles = buildReadNowTitleCandidates(titles);
   if (queryTitles.length === 0) {
     return null;
   }
 
-  const resolveWeebCentral = () => resolveWeebCentralReadNowFromTitles(queryTitles);
-  const resolveManhwaZone = () => resolveManhwaZoneReadNowFromTitles(queryTitles);
+  const cacheKey = `${options.preferManhwa ? "manhwa" : "any"}:${queryTitles
+    .slice(0, READ_NOW_TITLE_VARIANT_LIMIT)
+    .map((title) => normalizeTitle(title))
+    .join("|")}`;
+  const cached = readNowCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
 
-  return (await resolveWeebCentral()) ?? (await resolveManhwaZone());
+  const inFlight = inFlightReadNowResolutions.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const sourceTasks = options.preferManhwa
+    ? [
+        resolveManhwaZoneReadNowFromTitles(queryTitles),
+        resolveWeebCentralReadNowFromTitles(queryTitles)
+      ]
+    : [
+        resolveWeebCentralReadNowFromTitles(queryTitles),
+        resolveManhwaZoneReadNowFromTitles(queryTitles)
+      ];
+
+  const resolution = withTimeoutValue(firstNonNull(sourceTasks), READ_NOW_TIMEOUT_MS, null);
+  inFlightReadNowResolutions.set(cacheKey, resolution);
+
+  try {
+    const result = await resolution;
+    if (result) {
+      readNowCache.set(cacheKey, result);
+    }
+    return result;
+  } finally {
+    inFlightReadNowResolutions.delete(cacheKey);
+  }
 }
 
 function extractDomain(url: string): string {

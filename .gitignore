@@ -25,6 +25,8 @@ rag/eval/*.json
 rag/eval/*.log
 !rag/ingestion/.gitkeep
 !rag/ingestion/README.md
+!rag/ingestion/bm25_values.json
+!rag/eval/golden_top4000_cases.json
 
 # Local deployment notes
 DEPLOYMENT.md

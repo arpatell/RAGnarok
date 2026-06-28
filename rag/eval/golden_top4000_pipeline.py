@@ -48,6 +48,11 @@ def parse_args() -> argparse.Namespace:
         default="rag/ingestion/top_4000_documents_character_enriched.jsonl",
         help="Path to enriched top_4000 jsonl corpus.",
     )
+    parser.add_argument(
+        "--cases-json-path",
+        default="",
+        help="Optional prebuilt golden cases JSON. When set, case generation from docs-jsonl is skipped.",
+    )
     parser.add_argument("--rag-endpoint", default="http://127.0.0.1:8090/rag/search")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--per-medium", type=int, default=100, help="Cases per medium (anime, manga).")
@@ -81,6 +86,44 @@ def clean_text(value: Any) -> str:
     if not isinstance(value, str):
         return ""
     return " ".join(value.replace("\n", " ").split()).strip()
+
+
+def load_cases(path: Path) -> list[GoldenCase]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    rows = payload.get("cases") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise ValueError(f"Invalid golden cases file: {path}")
+
+    cases: list[GoldenCase] = []
+    for idx, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            raise ValueError(f"Invalid golden case at index {idx}: expected object")
+        case_id = clean_text(row.get("case_id"))
+        medium = clean_text(row.get("medium")).lower()
+        query_type = clean_text(row.get("query_type")).lower()
+        query = clean_text(row.get("query"))
+        target_title = clean_text(row.get("target_title"))
+        target_mal_id = row.get("target_mal_id")
+        if (
+            not case_id
+            or medium not in {"anime", "manga"}
+            or query_type not in {"semantic", "keyword", "title"}
+            or not query
+            or not target_title
+            or not isinstance(target_mal_id, int)
+        ):
+            raise ValueError(f"Invalid golden case at index {idx}: {row!r}")
+        cases.append(
+            GoldenCase(
+                case_id=case_id,
+                medium=medium,
+                query_type=query_type,
+                query=query,
+                target_title=target_title,
+                target_mal_id=target_mal_id,
+            )
+        )
+    return cases
 
 
 def normalize_title(value: str) -> str:
@@ -632,19 +675,22 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 def main() -> None:
     args = parse_args()
-    corpus = load_corpus(Path(args.docs_jsonl_path))
-    alias_frequency = build_alias_frequency(corpus)
-    title_alias_map = load_title_alias_map(Path(args.title_alias_json_path))
-    cases = build_cases(
-        corpus,
-        per_medium=args.per_medium,
-        semantic_ratio=args.semantic_ratio,
-        title_per_medium=args.title_per_medium,
-        seed=args.seed,
-        title_alias_map=title_alias_map,
-        alias_frequency=alias_frequency,
-        max_keyword_alias_frequency=args.max_keyword_alias_frequency,
-    )
+    if args.cases_json_path:
+        cases = load_cases(Path(args.cases_json_path))
+    else:
+        corpus = load_corpus(Path(args.docs_jsonl_path))
+        alias_frequency = build_alias_frequency(corpus)
+        title_alias_map = load_title_alias_map(Path(args.title_alias_json_path))
+        cases = build_cases(
+            corpus,
+            per_medium=args.per_medium,
+            semantic_ratio=args.semantic_ratio,
+            title_per_medium=args.title_per_medium,
+            seed=args.seed,
+            title_alias_map=title_alias_map,
+            alias_frequency=alias_frequency,
+            max_keyword_alias_frequency=args.max_keyword_alias_frequency,
+        )
 
     if args.limit and args.limit > 0:
         cases = cases[: args.limit]
@@ -674,6 +720,7 @@ def main() -> None:
     output = {
         "config": {
             "docs_jsonl_path": args.docs_jsonl_path,
+            "cases_json_path": args.cases_json_path,
             "rag_endpoint": args.rag_endpoint,
             "seed": args.seed,
             "per_medium": args.per_medium,

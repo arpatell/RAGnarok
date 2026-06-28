@@ -35,7 +35,9 @@ function resolveAutoFitMode(settings: ReaderSettings, heightWidthRatio: number |
 }
 
 function panelStyle(settings: ReaderSettings, heightWidthRatio?: number): CSSProperties {
-  const zoom = settings.zoomPercent;
+  const zoom = Math.min(200, Math.max(50, settings.zoomPercent));
+  const zoomFactor = zoom / 100;
+  const heightOffsetPx = Math.round(120 * zoomFactor);
   const fitMode =
     settings.fitMode === "original" || settings.fitMode === "custom"
       ? settings.fitMode
@@ -43,29 +45,35 @@ function panelStyle(settings: ReaderSettings, heightWidthRatio?: number): CSSPro
 
   if (fitMode === "height-fit") {
     return {
-      height: "calc(100dvh - 120px)",
+      height: `calc(${zoom}dvh - ${heightOffsetPx}px)`,
       width: "auto",
-      maxWidth: `${Math.max(100, zoom)}%`
+      maxWidth: "none",
+      maxHeight: "none"
     };
   }
 
   if (fitMode === "original") {
     return {
       width: "auto",
-      maxWidth: "none"
+      maxWidth: "none",
+      maxHeight: "none"
     };
   }
 
   if (fitMode === "custom") {
     return {
       width: `${zoom}%`,
-      height: "auto"
+      height: "auto",
+      maxWidth: "none",
+      maxHeight: "none"
     };
   }
 
   return {
     width: `${Math.max(60, zoom)}%`,
-    height: "auto"
+    height: "auto",
+    maxWidth: "none",
+    maxHeight: "none"
   };
 }
 

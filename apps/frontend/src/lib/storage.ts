@@ -231,6 +231,11 @@ export function getReaderSettings(): ReaderSettings {
       ? Math.min(32, Math.max(0, Math.round(saved.panelGap)))
       : defaults.panelGap;
 
+  const normalizedZoomPercent =
+    typeof saved.zoomPercent === "number"
+      ? Math.min(200, Math.max(50, Math.round(saved.zoomPercent / 5) * 5))
+      : defaults.zoomPercent;
+
   return {
     ...defaults,
     ...saved,
@@ -240,6 +245,7 @@ export function getReaderSettings(): ReaderSettings {
     preloadDepth: normalizedPreloadDepth,
     verticalArrowStepPx: normalizedVerticalArrowStep,
     panelGap: normalizedPanelGap,
+    zoomPercent: normalizedZoomPercent,
     turnPagesByClicking:
       typeof saved.turnPagesByClicking === "boolean"
         ? saved.turnPagesByClicking

@@ -94,6 +94,9 @@ export interface SuggestionsPayload {
     title: string;
     coverUrl: string | null;
     chapterCount: number;
+    votes?: number;
+    malId?: number;
+    url?: string;
   }>;
   trending: Array<{
     title: string;

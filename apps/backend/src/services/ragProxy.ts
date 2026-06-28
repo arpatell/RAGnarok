@@ -2,7 +2,7 @@ import { IngestError } from "../errors.js";
 
 const DEFAULT_RAG_API_URL = "http://127.0.0.1:8090/rag/search";
 const DEFAULT_TOP_K = 10;
-const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.RAG_REQUEST_TIMEOUT_MS ?? "30000", 10);
+const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.RAG_REQUEST_TIMEOUT_MS ?? "8000", 10);
 const JIKAN_TIMEOUT_MS = Math.max(3_000, Number.parseInt(process.env.JIKAN_TIMEOUT_MS ?? "6500", 10));
 const JIKAN_BASE_URL = "https://api.jikan.moe/v4";
 const JIKAN_MIN_INTERVAL_MS = Math.max(450, Number.parseInt(process.env.JIKAN_MIN_INTERVAL_MS ?? "700", 10));
@@ -11,9 +11,13 @@ const JIKAN_CACHE_TTL_MS = Math.max(60_000, Number.parseInt(process.env.JIKAN_CA
 const JIKAN_RETRYABLE_STATUS = new Set([408, 425, 500, 502, 503, 504, 520, 522, 524]);
 const JIKAN_ENRICH_TOP_N = Math.max(0, Number.parseInt(process.env.RAG_JIKAN_ENRICH_TOP_N ?? "2", 10));
 const JIKAN_ANIME_COMPANION_TOP_N = Math.max(0, Number.parseInt(process.env.RAG_JIKAN_ANIME_COMPANION_TOP_N ?? "0", 10));
+const RAG_RESPONSE_CACHE_TTL_MS = Math.max(0, Number.parseInt(process.env.RAG_RESPONSE_CACHE_TTL_MS ?? "300000", 10));
+const RAG_RESPONSE_CACHE_MAX = Math.max(0, Number.parseInt(process.env.RAG_RESPONSE_CACHE_MAX ?? "256", 10));
 
 let nextJikanRequestAt = 0;
 const jikanJsonCache = new Map<string, { expiresAt: number; value: unknown }>();
+const ragResponseCache = new Map<string, { expiresAt: number; value: RagSearchResponse }>();
+const inFlightRagSearches = new Map<string, Promise<RagSearchResponse>>();
 
 type ResultSource = "pinecone";
 
@@ -266,6 +270,47 @@ function normalizeTitleForMatch(value: string): string {
     .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function cloneRagResponse(value: RagSearchResponse): RagSearchResponse {
+  return JSON.parse(JSON.stringify(value)) as RagSearchResponse;
+}
+
+function getCachedRagResponse(cacheKey: string): RagSearchResponse | null {
+  if (!cacheKey || RAG_RESPONSE_CACHE_TTL_MS <= 0) {
+    return null;
+  }
+
+  const cached = ragResponseCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    ragResponseCache.delete(cacheKey);
+    return null;
+  }
+
+  return cloneRagResponse(cached.value);
+}
+
+function setCachedRagResponse(cacheKey: string, value: RagSearchResponse): void {
+  if (!cacheKey || RAG_RESPONSE_CACHE_TTL_MS <= 0 || RAG_RESPONSE_CACHE_MAX <= 0) {
+    return;
+  }
+
+  while (ragResponseCache.size >= RAG_RESPONSE_CACHE_MAX) {
+    const oldestKey = ragResponseCache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    ragResponseCache.delete(oldestKey);
+  }
+
+  ragResponseCache.set(cacheKey, {
+    expiresAt: Date.now() + RAG_RESPONSE_CACHE_TTL_MS,
+    value: cloneRagResponse(value)
+  });
 }
 
 function tokenizeTitleForMatch(value: string): string[] {
@@ -862,6 +907,31 @@ async function searchMangaRagSingle(query: string): Promise<RagSearchResponse> {
     };
   }
 
+  const cacheKey = normalizeTitleForMatch(normalized);
+  const cached = getCachedRagResponse(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const inFlight = inFlightRagSearches.get(cacheKey);
+  if (inFlight) {
+    return cloneRagResponse(await inFlight);
+  }
+
+  const searchPromise = searchMangaRagSingleUncached(normalized);
+  inFlightRagSearches.set(cacheKey, searchPromise);
+
+  try {
+    const response = await searchPromise;
+    setCachedRagResponse(cacheKey, response);
+    return cloneRagResponse(response);
+  } finally {
+    inFlightRagSearches.delete(cacheKey);
+  }
+}
+
+async function searchMangaRagSingleUncached(normalized: string): Promise<RagSearchResponse> {
+
   const remote = await callHybridRagService(normalized);
   const remoteAnswer = cleanText(remote.answer);
   const remoteResults = normalizeRemoteResults(remote).slice(0, DEFAULT_TOP_K);
@@ -1025,42 +1095,19 @@ export async function searchMangaRag(
     return searchMangaRagSingle(query);
   }
 
-  const entries: Array<{ response: RagSearchResponse; alias: TitleAliasCandidate | null }> = [];
   const primary = await searchMangaRagSingle(normalized);
-  entries.push({ response: primary, alias: null });
   await options.onProgress?.({
     stage: "primary",
     query: normalized,
     payload: primary
   });
-
-  const aliases = await fetchJikanTitleAliasCandidates(normalized);
-  const seenQueries = new Set([normalizeTitleForMatch(normalized)]);
-
-  for (const alias of aliases) {
-    const aliasQueryKey = normalizeTitleForMatch(alias.title);
-    if (!aliasQueryKey || seenQueries.has(aliasQueryKey)) {
-      continue;
-    }
-    seenQueries.add(aliasQueryKey);
-
-    const response = await searchMangaRagSingle(alias.title);
-    entries.push({ response, alias });
-    await options.onProgress?.({
-      stage: "title_alias",
-      query: alias.title,
-      payload: mergeRagResponses(normalized, entries)
-    });
-  }
-
-  const finalPayload = mergeRagResponses(normalized, entries);
   await options.onProgress?.({
     stage: "final",
     query: normalized,
-    payload: finalPayload
+    payload: primary
   });
 
-  return finalPayload;
+  return primary;
 }
 
 export async function fetchRagResultLiveMetadata(

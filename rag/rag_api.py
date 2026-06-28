@@ -101,7 +101,6 @@ TITLE_QUERY_HINT_TOKENS = {
     "woman",
     "man",
 }
-
 load_dotenv()
 
 SYNTHESIS_SYSTEM_PROMPT = (
@@ -186,7 +185,7 @@ def load_config() -> RagApiConfig:
         raise RuntimeError("PINECONE_INDEX is required.")
 
     top_k = max(1, int(os.getenv("RAG_TOP_K", "10")))
-    candidate_pool_default = max(top_k * 6, 40)
+    candidate_pool_default = max(top_k * 3, 30)
     candidate_pool_size = max(top_k, int(os.getenv("RAG_CANDIDATE_POOL_SIZE", str(candidate_pool_default))))
 
     return RagApiConfig(
@@ -630,10 +629,6 @@ class HybridRagService:
         if not pinecone_api_key:
             raise RuntimeError("PINECONE_API_KEY is required.")
 
-        cerebras_api_key = os.getenv("CEREBRAS_API_KEY", "").strip()
-        if not cerebras_api_key:
-            raise RuntimeError("CEREBRAS_API_KEY is required.")
-
         self._embeddings = HuggingFaceEmbeddings(
             model_name="BAAI/bge-small-en-v1.5",
             model_kwargs={"device": "cpu"},
@@ -653,15 +648,21 @@ class HybridRagService:
         bm25 = BM25Encoder()
         loaded_bm25 = bm25.load(config.bm25_values_path)
         self._bm25 = loaded_bm25 if isinstance(loaded_bm25, BM25Encoder) else bm25
-        llm_timeout_seconds = float(os.getenv("CEREBRAS_TIMEOUT_SECONDS", "8"))
-        llm_max_retries = int(os.getenv("CEREBRAS_MAX_RETRIES", "0"))
-        self._llm = ChatCerebras(
-            model=config.cerebras_model,
-            temperature=0,
-            api_key=cerebras_api_key,
-            timeout=llm_timeout_seconds,
-            max_retries=llm_max_retries,
-        )
+        self._llm_rerank_enabled = os.getenv("RAG_LLM_RERANK_ENABLED", "0").strip() == "1"
+        self._llm = None
+        if self._llm_rerank_enabled:
+            cerebras_api_key = os.getenv("CEREBRAS_API_KEY", "").strip()
+            if not cerebras_api_key:
+                raise RuntimeError("CEREBRAS_API_KEY is required when RAG_LLM_RERANK_ENABLED=1.")
+            llm_timeout_seconds = float(os.getenv("CEREBRAS_TIMEOUT_SECONDS", "4"))
+            llm_max_retries = int(os.getenv("CEREBRAS_MAX_RETRIES", "0"))
+            self._llm = ChatCerebras(
+                model=config.cerebras_model,
+                temperature=0,
+                api_key=cerebras_api_key,
+                timeout=llm_timeout_seconds,
+                max_retries=llm_max_retries,
+            )
         self._llm_backoff_until = 0.0
         self._http = httpx.Client(
             timeout=config.jikan_timeout_seconds,
@@ -688,7 +689,7 @@ class HybridRagService:
                     self._title_exact_lookup.setdefault(loose_norm, []).append(entry)
         self._title_match_threshold = max(0.80, min(0.99, float(os.getenv("RAG_TITLE_MATCH_THRESHOLD", "0.88"))))
         self._title_near_threshold = max(0.85, min(0.995, float(os.getenv("RAG_TITLE_NEAR_THRESHOLD", "0.935"))))
-        self._title_jikan_fallback_enabled = os.getenv("RAG_TITLE_JIKAN_FALLBACK", "1").strip() != "0"
+        self._title_jikan_fallback_enabled = os.getenv("RAG_TITLE_JIKAN_FALLBACK", "0").strip() == "1"
         self._title_jikan_search_limit = max(2, int(os.getenv("RAG_TITLE_JIKAN_SEARCH_LIMIT", "6")))
         self._title_query_cache_ttl = max(300.0, float(os.getenv("RAG_TITLE_QUERY_CACHE_TTL_SECONDS", "1800")))
         self._title_query_cache: dict[str, tuple[float, list[tuple[float, TitleIndexEntry]]]] = {}
@@ -699,8 +700,13 @@ class HybridRagService:
         self._next_jikan_request_at = 0.0
         self._jikan_cache: dict[int, tuple[float, dict[str, Any]]] = {}
         self._jikan_lock = threading.Lock()
+        self._response_cache_ttl = max(0.0, float(os.getenv("RAG_RESPONSE_CACHE_TTL_SECONDS", "300")))
+        self._response_cache_max = max(0, int(os.getenv("RAG_RESPONSE_CACHE_MAX", "256")))
+        self._response_cache: dict[str, tuple[float, RagSearchResponse]] = {}
+        self._inflight_searches: dict[str, threading.Event] = {}
+        self._search_cache_lock = threading.Lock()
         LOGGER.info(
-            "Hybrid RAG ready. index=%s namespaces=%s top_k=%d pool=%d alpha=%.2f aliases=%d titles=%d",
+            "Hybrid RAG ready. index=%s namespaces=%s top_k=%d pool=%d alpha=%.2f aliases=%d titles=%d llm=%s title_jikan=%s",
             config.pinecone_index,
             ",".join(config.pinecone_namespaces),
             config.top_k,
@@ -708,6 +714,8 @@ class HybridRagService:
             config.hybrid_dense_alpha,
             len(self._alias_phrase_set),
             len(self._title_index),
+            self._llm_rerank_enabled,
+            self._title_jikan_fallback_enabled,
         )
 
     @staticmethod
@@ -1060,15 +1068,20 @@ class HybridRagService:
         return ranked
 
     def hybrid_retrieve(self, query: str) -> list[RagResult]:
+        started = time.perf_counter()
         query_tokens = _query_tokens(query)
         query_is_character = _is_character_query(query, query_tokens, self._alias_phrase_set, self._alias_token_set)
         candidate_pool = self.config.candidate_pool_size
         if query_is_character:
-            character_pool = int(os.getenv("RAG_CHARACTER_CANDIDATE_POOL", "160"))
+            character_pool = int(os.getenv("RAG_CHARACTER_CANDIDATE_POOL", "80"))
             candidate_pool = max(candidate_pool, character_pool)
 
+        embed_started = time.perf_counter()
         dense_query = self._embeddings.embed_query(query)
+        embed_ms = int((time.perf_counter() - embed_started) * 1000)
+        sparse_started = time.perf_counter()
         sparse_query = self._bm25.encode_queries(query)
+        sparse_ms = int((time.perf_counter() - sparse_started) * 1000)
         dense_alpha = _hybrid_alpha_for_query(
             query_tokens=query_tokens,
             query_is_character=query_is_character,
@@ -1081,6 +1094,7 @@ class HybridRagService:
         )
 
         collected: list[dict[str, Any]] = []
+        pinecone_started = time.perf_counter()
         for namespace in self.config.pinecone_namespaces:
             try:
                 collected.extend(
@@ -1093,10 +1107,13 @@ class HybridRagService:
                 )
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("Namespace query failed for '%s': %s", namespace, exc)
+        pinecone_ms = int((time.perf_counter() - pinecone_started) * 1000)
 
+        rank_started = time.perf_counter()
         deduped = self._dedupe_candidates(collected)
         reranked = self._rerank(query, deduped)
         top_rows = reranked[:candidate_pool]
+        rank_ms = int((time.perf_counter() - rank_started) * 1000)
 
         results: list[RagResult] = []
         for rank, row in enumerate(top_rows, start=1):
@@ -1119,6 +1136,20 @@ class HybridRagService:
             )
             result._character_aliases = character_aliases
             results.append(result)
+        total_ms = int((time.perf_counter() - started) * 1000)
+        LOGGER.info(
+            "RAG hybrid query ms total=%d embed=%d sparse=%d pinecone=%d rerank=%d collected=%d deduped=%d pool=%d character=%s query=%r",
+            total_ms,
+            embed_ms,
+            sparse_ms,
+            pinecone_ms,
+            rank_ms,
+            len(collected),
+            len(deduped),
+            candidate_pool,
+            query_is_character,
+            query[:120],
+        )
         return results
 
     def fetch_live_jikan_details(self, mal_id: int, preferred_media_type: str | None = None) -> dict[str, Any]:
@@ -1214,6 +1245,8 @@ class HybridRagService:
 
     def llm_rank_candidates(self, query: str, candidates: list[RagResult]) -> tuple[list[RagResult], str | None]:
         if len(candidates) <= 1:
+            return candidates, None
+        if not self._llm_rerank_enabled or self._llm is None:
             return candidates, None
         if time.monotonic() < self._llm_backoff_until:
             return candidates, None
@@ -1367,17 +1400,53 @@ class HybridRagService:
 
         return items
 
-    def search(self, query: str) -> RagSearchResponse:
+    @staticmethod
+    def _copy_response(response: RagSearchResponse) -> RagSearchResponse:
+        return response.model_copy(deep=True)
+
+    def _get_cached_response(self, cache_key: str) -> RagSearchResponse | None:
+        if self._response_cache_ttl <= 0 or not cache_key:
+            return None
+        with self._search_cache_lock:
+            cached = self._response_cache.get(cache_key)
+            now = time.monotonic()
+            if cached and cached[0] > now:
+                return self._copy_response(cached[1])
+            if cached:
+                self._response_cache.pop(cache_key, None)
+        return None
+
+    def _store_cached_response(self, cache_key: str, response: RagSearchResponse) -> None:
+        if self._response_cache_ttl <= 0 or self._response_cache_max <= 0 or not cache_key:
+            return
+        with self._search_cache_lock:
+            while len(self._response_cache) >= self._response_cache_max:
+                oldest_key = next(iter(self._response_cache), None)
+                if oldest_key is None:
+                    break
+                self._response_cache.pop(oldest_key, None)
+            self._response_cache[cache_key] = (
+                time.monotonic() + self._response_cache_ttl,
+                self._copy_response(response),
+            )
+
+    def _search_uncached(self, query: str) -> RagSearchResponse:
+        started = time.perf_counter()
+        direct_started = time.perf_counter()
         title_first = self.direct_title_retrieve(query)
+        direct_ms = int((time.perf_counter() - direct_started) * 1000)
         retrieved = title_first if title_first else self.hybrid_retrieve(query)
         if not retrieved:
             return RagSearchResponse(query=query, top_results=[], highlight=None)
 
         llm_reasoning: str | None = None
+        llm_ms = 0
         if title_first:
             ranked = retrieved
         else:
+            llm_started = time.perf_counter()
             ranked, llm_reasoning = self.llm_rank_candidates(query, retrieved)
+            llm_ms = int((time.perf_counter() - llm_started) * 1000)
         normalized_ranked = ranked if title_first else self.normalize_ranked_results(query, ranked)
         top_results_raw = normalized_ranked[: self.config.top_k]
         top_results: list[RagResult] = []
@@ -1397,19 +1466,11 @@ class HybridRagService:
             return RagSearchResponse(query=query, top_results=[], highlight=None)
 
         top_result = top_results[0]
-        preferred_media_type = _preferred_media_type_from_snippet(top_result.snippet)
-        live_payload = (
-            self.fetch_live_jikan_details(top_result.mal_id, preferred_media_type)
-            if top_result.mal_id is not None
-            else {}
-        )
-        live_data = live_payload.get("data", {}) if isinstance(live_payload, dict) else {}
-        live_data = live_data if isinstance(live_data, dict) else {}
 
         justification = self.synthesize_justification(
             query=query,
             top_results=top_results,
-            live_jikan_payload=live_payload,
+            live_jikan_payload={},
             llm_reasoning=llm_reasoning,
         )
 
@@ -1418,13 +1479,58 @@ class HybridRagService:
             title=top_result.title,
             justification=justification,
             citation=top_result.citation,
-            live_media_type=clean_text(live_payload.get("media_type")) or None,
-            live_status=clean_text(live_data.get("status")) or None,
-            live_score=float(live_data.get("score")) if isinstance(live_data.get("score"), (float, int)) else None,
-            image_url=_extract_image_url(live_data),
+            live_media_type=_preferred_media_type_from_snippet(top_result.snippet),
+            live_status=None,
+            live_score=None,
+            image_url=None,
         )
 
-        return RagSearchResponse(query=query, top_results=top_results, highlight=highlight)
+        response = RagSearchResponse(query=query, top_results=top_results, highlight=highlight)
+        total_ms = int((time.perf_counter() - started) * 1000)
+        LOGGER.info(
+            "RAG search ms total=%d direct_title=%d llm=%d mode=%s results=%d query=%r",
+            total_ms,
+            direct_ms,
+            llm_ms,
+            "title" if title_first else "hybrid",
+            len(top_results),
+            query[:120],
+        )
+        return response
+
+    def search(self, query: str) -> RagSearchResponse:
+        cache_key = _normalized_text(query)
+        cached = self._get_cached_response(cache_key)
+        if cached:
+            LOGGER.info("RAG search cache hit query=%r", query[:120])
+            return cached
+
+        owner = False
+        wait_event: threading.Event | None = None
+        if cache_key:
+            with self._search_cache_lock:
+                wait_event = self._inflight_searches.get(cache_key)
+                if wait_event is None:
+                    wait_event = threading.Event()
+                    self._inflight_searches[cache_key] = wait_event
+                    owner = True
+
+        if wait_event is not None and not owner:
+            wait_event.wait(max(0.1, float(os.getenv("RAG_INFLIGHT_WAIT_SECONDS", "15"))))
+            cached_after_wait = self._get_cached_response(cache_key)
+            if cached_after_wait:
+                LOGGER.info("RAG search in-flight shared query=%r", query[:120])
+                return cached_after_wait
+
+        try:
+            response = self._search_uncached(query)
+            self._store_cached_response(cache_key, response)
+            return self._copy_response(response)
+        finally:
+            if owner and wait_event is not None:
+                with self._search_cache_lock:
+                    wait_event.set()
+                    self._inflight_searches.pop(cache_key, None)
 
 
 app = FastAPI(title="Manga RAG API", version="2.1.0")
@@ -1443,16 +1549,22 @@ def get_service() -> HybridRagService:
 def health() -> dict[str, str]:
     if _startup_error:
         return {"status": "error", "detail": _startup_error}
-    return {"status": "ok"}
+    try:
+        get_service()
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "detail": str(exc)}
+    return {"status": "ok", "initialized": "true"}
 
 
 @app.on_event("startup")
 def warm_start_service() -> None:
     global _startup_error
+    started = time.perf_counter()
     try:
         get_service()
         _startup_error = None
-        LOGGER.info("RAG service warm-start complete.")
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        LOGGER.info("RAG service warm-start complete ms=%d.", elapsed_ms)
     except Exception as exc:  # noqa: BLE001
         _startup_error = str(exc)
         LOGGER.exception("RAG warm-start failed.")

@@ -15,8 +15,8 @@ Search examples the system is designed to handle:
 
 - `guy finds notebook that can kill people` -> Death Note
 - `satoru gojo` -> Jujustu Kaisen
+- `maid sama` -> Kaichou wa Maid-sama!
 - `satoko kirigaya` -> Firefly Wedding
-- `gods vs humans` -> Record of Ragnarok
 - `girl can hear ghosts` -> Phantom Whispers
 
 The app supports plot descriptions, title searches, character aliases, and direct URL imports without requiring users to know database IDs or exact romanized titles.

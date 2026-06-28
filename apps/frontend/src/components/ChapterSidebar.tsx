@@ -361,26 +361,35 @@ export function ChapterSidebar({
         )}
       </section>
 
-      <section className="sidebar-section" aria-label="Suggestions">
-        <h3>Suggestions</h3>
+      {suggestions ? (
+        <section className="sidebar-section" aria-label="Suggestions">
+          <h3>Suggestions</h3>
 
-        <div className="suggestion-group">
-          <h4>Similar Series</h4>
-          {suggestions?.similarSeries.length ? (
-            <ul>
-              {suggestions.similarSeries.map((series) => (
-                <li key={series.title}>
-                  <span>
-                    {series.title} ({series.chapterCount} ch)
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted">Not enough genre data from this source.</p>
-          )}
-        </div>
+          <div className="suggestion-group">
+            <h4>Jikan Recommendations</h4>
+            {suggestions.similarSeries.length ? (
+              <ul>
+                {suggestions.similarSeries.map((series) => (
+                  <li key={series.title}>
+                    {series.url ? (
+                      <a href={series.url} target="_blank" rel="noreferrer">
+                        {series.title}
+                      </a>
+                    ) : (
+                      <span>{series.title}</span>
+                    )}
+                    {typeof series.votes === "number" ? <small> {series.votes} votes</small> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">No Jikan recommendations found.</p>
+            )}
+          </div>
+        </section>
+      ) : null}
 
+      <section className="sidebar-section" aria-label="Support">
         <div className="suggestion-group support-coffee-group">
           <button
             type="button"

@@ -1,0 +1,2245 @@
+{
+  "description": "Deterministic top-4000 golden cases for CI. Generated from seed=42.",
+  "cases": [
+    {
+      "case_id": "manga-semantic-0200",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where The sequel and the continuation of Feng Shen Ji.",
+      "target_title": "Feng Shen Ji II",
+      "target_mal_id": 43915
+    },
+    {
+      "case_id": "anime-keyword-0092",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "Sentan Island Commandant",
+      "target_title": "Bounen no Xamdou",
+      "target_mal_id": 4177
+    },
+    {
+      "case_id": "manga-semantic-0172",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: J is a lone assassin feared as \"untouchable\" in the underworld. Megumi is a lonely girl who has no place at home or school. When the two meet,",
+      "target_title": "J\u21d4M",
+      "target_mal_id": 162566
+    },
+    {
+      "case_id": "anime-title-0107",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Himesama \"Goumon\" no Jikan desu 2nd Season",
+      "target_title": "Himesama \"Goumon\" no Jikan desu 2nd Season",
+      "target_mal_id": 58524
+    },
+    {
+      "case_id": "manga-title-0260",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Black Clover",
+      "target_title": "Black Clover",
+      "target_mal_id": 86337
+    },
+    {
+      "case_id": "manga-semantic-0146",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Growing up in a dreary suburb, Sakuma has little to brighten his humdrum days aside from his best friend. The bright, talented, and attractive Ushio seems to have",
+      "target_title": "Mimoza no Kokuhaku",
+      "target_mal_id": 142170
+    },
+    {
+      "case_id": "manga-keyword-0218",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "Lauderdale, Emmeline",
+      "target_title": "Hakushaku Cain Series",
+      "target_mal_id": 885
+    },
+    {
+      "case_id": "manga-keyword-0236",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "Kwon, Seungha",
+      "target_title": "Odd Girl Out",
+      "target_mal_id": 119521
+    },
+    {
+      "case_id": "anime-title-0137",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Brigadoon: Marin to Melan",
+      "target_title": "Brigadoon: Marin to Melan",
+      "target_mal_id": 1450
+    },
+    {
+      "case_id": "manga-semantic-0204",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about Ten years ago, \"the Gate\" appeared and connected the real world with the realm of magic and monsters. To combat these vile beasts, ordinary people received superhuman powers",
+      "target_title": "Solo Leveling",
+      "target_mal_id": 121496
+    },
+    {
+      "case_id": "manga-semantic-0158",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about Suffering from a terminal illness, Yuuta Itou's mother asks him to film her last moments, which he does. From her radiant smile when she is with her family",
+      "target_title": "Sayonara Eri",
+      "target_mal_id": 145863
+    },
+    {
+      "case_id": "anime-semantic-0010",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where Animated bloopers, based on the extra section of the original manga, included with the BD/DVD release of no : Last Game.",
+      "target_title": "Kuroko no Basket: Last Game NG-shuu",
+      "target_mal_id": 35658
+    },
+    {
+      "case_id": "manga-keyword-0222",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "Suzukaze, Asahi",
+      "target_title": "Boku no Suki na Hito ga Suki na Hito",
+      "target_mal_id": 153350
+    },
+    {
+      "case_id": "manga-title-0263",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Doukyuusei",
+      "target_title": "Doukyuusei",
+      "target_mal_id": 9699
+    },
+    {
+      "case_id": "anime-title-0126",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Vinland Saga Season 2",
+      "target_title": "Vinland Saga Season 2",
+      "target_mal_id": 49387
+    },
+    {
+      "case_id": "manga-title-0278",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Shoukoku no Altair",
+      "target_title": "Shoukoku no Altair",
+      "target_mal_id": 1605
+    },
+    {
+      "case_id": "anime-semantic-0068",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Shi Miao has a lot of experience dealing with her older brother's peculiar habits. After all her scolding, it is natural to expect that Shi Fen's antics would",
+      "target_title": "Ani ni Tsukeru Kusuri wa Nai! 4",
+      "target_mal_id": 42238
+    },
+    {
+      "case_id": "manga-semantic-0210",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where High school student Yasuto Akashi's day begins like any other, but a fight with his best friend\u2014Senichi Aoyama\u2014causes him to skip school. Akashi realizes that he is in",
+      "target_title": "Kamisama no Iutoori 2",
+      "target_mal_id": 47363
+    },
+    {
+      "case_id": "anime-keyword-0099",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "find title for Jiang, Li",
+      "target_title": "Xingchen Bian 6th Season",
+      "target_mal_id": 60787
+    },
+    {
+      "case_id": "manga-semantic-0150",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about The world of Kamiyama High School is full of colorful and mysterious events, but 15-year-old Houtarou Oreki cannot be bothered to pay much attention to it. Choosing to",
+      "target_title": "Hyouka",
+      "target_mal_id": 41629
+    },
+    {
+      "case_id": "anime-semantic-0024",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: New !! web animated series based on the game story \"\".",
+      "target_title": "Ensemble Stars!! Tsuioku Selection Element",
+      "target_mal_id": 52999
+    },
+    {
+      "case_id": "manga-keyword-0219",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Nota Seniorious, Chtholly",
+      "target_title": "Shuumatsu Nani Shitemasu ka? Isogashii desu ka? Sukutte Moratte Ii desu ka? Ex",
+      "target_mal_id": 103722
+    },
+    {
+      "case_id": "anime-semantic-0043",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about Luo is a young monster who normally takes the form of a small black cat. Living freely in the forests, gradual deforestation and human development force him to",
+      "target_title": "Luo Xiaohei Zhanji (Movie)",
+      "target_mal_id": 40211
+    },
+    {
+      "case_id": "anime-semantic-0004",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: While the galaxy remains at peace, Masaki continues to live on Earth with Ryouko and Washuu Hakubi, Aeka and Sasami Jurai Masaki, Mihoshi Kuramitsu, and the cat-like creature",
+      "target_title": "Tenchi Muyou! Ryououki 2nd Season",
+      "target_mal_id": 540
+    },
+    {
+      "case_id": "anime-title-0111",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Mahou Shoujo Lyrical Nanoha: The Movie 1st",
+      "target_title": "Mahou Shoujo Lyrical Nanoha: The Movie 1st",
+      "target_mal_id": 4985
+    },
+    {
+      "case_id": "manga-semantic-0211",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about Be it throwing herself off her balcony, drinking poison, or even stabbing herself, Eris Miserian has attempted every means to end her miserable existence and return to her",
+      "target_title": "Kill the Villainess",
+      "target_mal_id": 148410
+    },
+    {
+      "case_id": "anime-title-0131",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Zom 100",
+      "target_title": "Zom 100: Zombie ni Naru made ni Shitai 100 no Koto",
+      "target_mal_id": 54112
+    },
+    {
+      "case_id": "manga-semantic-0157",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Two families are tied together by a curse. Every 100 years, one person from each family must share the same fate for exactly one year. The pair will",
+      "target_title": "Saiyaku wa Boku wo Suki Sugiru",
+      "target_mal_id": 28631
+    },
+    {
+      "case_id": "anime-title-0106",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Nurarihyon no Mago: Sennen Makyou",
+      "target_title": "Nurarihyon no Mago: Sennen Makyou",
+      "target_mal_id": 10049
+    },
+    {
+      "case_id": "anime-title-0121",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Ginga Eiyuu Densetsu",
+      "target_title": "Ginga Eiyuu Densetsu: Waga Yuku wa Hoshi no Taikai",
+      "target_mal_id": 3014
+    },
+    {
+      "case_id": "manga-title-0248",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Medalist",
+      "target_title": "Medalist",
+      "target_mal_id": 129621
+    },
+    {
+      "case_id": "manga-semantic-0151",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: The hero of Ken differs from your standard otherworldly protagonist in that he is reincarnated as a sword! Beginning his quest by spawning in the middle of a",
+      "target_title": "Tensei shitara Ken deshita",
+      "target_mal_id": 99891
+    },
+    {
+      "case_id": "manga-semantic-0160",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about , a mysterious 4 year old, begins living in an apartment on his own. For some reason, he's perfectly capable of taking care of himself, despite the concerns",
+      "target_title": "Kotarou wa Hitorigurashi",
+      "target_mal_id": 117954
+    },
+    {
+      "case_id": "manga-title-0251",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Kimi no Na wa.",
+      "target_title": "Kimi no Na wa.",
+      "target_mal_id": 99314
+    },
+    {
+      "case_id": "manga-semantic-0159",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about To pursue her dream of becoming an author, young Hanako Kujou abandons her home in Japan to journey to England. However, belittled and rejected by the publishing company",
+      "target_title": "Sayonara Rose Garden",
+      "target_mal_id": 122575
+    },
+    {
+      "case_id": "anime-semantic-0053",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about It is 2911 and the solar system is made up of of 50 planets. I.C Blues, a gambler, makes a bet with the boss of a criminal syndicate",
+      "target_title": "Ginga Shippuu Sasuraiger",
+      "target_mal_id": 4244
+    },
+    {
+      "case_id": "anime-semantic-0065",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: In a world filled with superpowered Quirk users, college student Kouichi Haimawari's dream is to become a hero just like the ones he so admires. Unfortunately for him,",
+      "target_title": "Vigilante: Boku no Hero Academia Illegals",
+      "target_mal_id": 60593
+    },
+    {
+      "case_id": "manga-semantic-0181",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Maeda is a new student in the Teiken High School. He stutters when he's nervous and he's rather clumsy. He gets noted immediately because he hits a teacher",
+      "target_title": "Rokudenashi Blues",
+      "target_mal_id": 4444
+    },
+    {
+      "case_id": "anime-title-0119",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "BanG Dream! It's MyGO!!!!! Movie",
+      "target_title": "BanG Dream! It's MyGO!!!!! Movie",
+      "target_mal_id": 57754
+    },
+    {
+      "case_id": "anime-semantic-0035",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: Yotarou is a former yakuza member fresh out of prison and fixated on just one thing: rather than return to a life of crime, the young man aspires",
+      "target_title": "Shouwa Genroku Rakugo Shinjuu",
+      "target_mal_id": 28735
+    },
+    {
+      "case_id": "anime-keyword-0085",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Tateishi, Stepmother",
+      "target_title": "Death Parade",
+      "target_mal_id": 28223
+    },
+    {
+      "case_id": "anime-semantic-0021",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about There is a small village called Jimuna on the continent of Jamu Jamu. This village is home to a girl named Kukuri. She is the last descendant of",
+      "target_title": "Mahoujin Guruguru",
+      "target_mal_id": 331
+    },
+    {
+      "case_id": "anime-title-0104",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Aikatsu! Movie",
+      "target_title": "Aikatsu! Movie",
+      "target_mal_id": 22819
+    },
+    {
+      "case_id": "manga-semantic-0182",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about After twelve years, a former teammate\u2014no, a thorn in his side\u2014suddenly reappears. Eunsan isn't thrilled to be working with Ian again, having long buried both his ice hockey",
+      "target_title": "Melting Point",
+      "target_mal_id": 180084
+    },
+    {
+      "case_id": "manga-semantic-0163",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Inept at dealing with people, Koyuki Hikawa maintains a wall between herself and others. She spends her time in high school away from others, all alone. At least",
+      "target_title": "Koori no Jouheki",
+      "target_mal_id": 160303
+    },
+    {
+      "case_id": "anime-keyword-0089",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "find title for Togawa, Mankichi",
+      "target_title": "Otoko Ippiki Gaki Daishou",
+      "target_mal_id": 17467
+    },
+    {
+      "case_id": "anime-title-0120",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Gintama Movie 1: Shinyaku Benizakura-hen",
+      "target_title": "Gintama Movie 1: Shinyaku Benizakura-hen",
+      "target_mal_id": 7472
+    },
+    {
+      "case_id": "anime-semantic-0072",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about primarily focuses on the daily antics of a trio of childhood friends\u2014high school girls Mio Naganohara, Yuuko Aioi and Mai Minakami\u2014whose stories soon intertwine with the young genius",
+      "target_title": "Nichijou",
+      "target_mal_id": 10165
+    },
+    {
+      "case_id": "manga-semantic-0176",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about A few thousand years has passed since an alchemist created . He is now living with Jane learning what it means to be alive as a human. (",
+      "target_title": "Winter Woods",
+      "target_mal_id": 113671
+    },
+    {
+      "case_id": "anime-semantic-0059",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where is a plucky young girl from an underground civilization boasting an incredible network of tunnels. Inspired by a friend that mysteriously went missing, she is often reprimanded due",
+      "target_title": "Sakasama no Patema",
+      "target_mal_id": 12477
+    },
+    {
+      "case_id": "anime-title-0135",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Love Live! School Idol Project 2nd Season",
+      "target_title": "Love Live! School Idol Project 2nd Season",
+      "target_mal_id": 19111
+    },
+    {
+      "case_id": "anime-keyword-0091",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "find title for Hirabayashi, Mafune",
+      "target_title": "Tropical-Rouge! Precure",
+      "target_mal_id": 44191
+    },
+    {
+      "case_id": "manga-semantic-0199",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Even with the distance between them, Hikaru Kusakabe and Rihito Sajou have not given up on their promise to each other. Each time Kusakabe visits Sajou, their bond",
+      "target_title": "O.B.",
+      "target_mal_id": 39565
+    },
+    {
+      "case_id": "manga-semantic-0173",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Jinta Yadomi spends most of his days at home, indifferent to his school and social life after a tragic accident tore his childhood friendship group apart. Years later,",
+      "target_title": "Ano Hi Mita Hana no Namae wo Bokutachi wa Mada Shiranai.",
+      "target_mal_id": 35733
+    },
+    {
+      "case_id": "anime-title-0130",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Hakuouki Movie 2: Shikon Soukyuu",
+      "target_title": "Hakuouki Movie 2: Shikon Soukyuu",
+      "target_mal_id": 13119
+    },
+    {
+      "case_id": "manga-semantic-0169",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where The series tells the story of how Misaki Yata and Saruhiko Fushimi met and parted ways. (",
+      "target_title": "K: Lost Small World",
+      "target_mal_id": 73451
+    },
+    {
+      "case_id": "anime-semantic-0045",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where In February 1999, a string of murders has Shiki Ryougi and Mikiya Kokutou on edge. These crimes share a disturbing resemblance to a similar set of homicides from",
+      "target_title": "Kara no Kyoukai Movie 7: Satsujin Kousatsu (Go)",
+      "target_mal_id": 5205
+    },
+    {
+      "case_id": "anime-semantic-0018",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about The aloof protagonist: a bookworm who is deeply detached from the world he resides in. He has no interest in others and is firmly convinced that nobody has",
+      "target_title": "Kimi no Suizou wo Tabetai",
+      "target_mal_id": 36098
+    },
+    {
+      "case_id": "anime-title-0133",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Gintama\u00b0: Aizome Kaori",
+      "target_title": "Gintama\u00b0: Aizome Kaori-hen",
+      "target_mal_id": 32366
+    },
+    {
+      "case_id": "manga-semantic-0213",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about In a world after death, angels fight for their fate and their future. Yuri, the leader of the Shinda Sekai Sensen, rebels against the god who destined her",
+      "target_title": "Angel Beats!: Heaven's Door",
+      "target_mal_id": 19671
+    },
+    {
+      "case_id": "anime-semantic-0037",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about When mankind's savagery surpasses his fear of death, there is little hope for those who wish to live honest lives. Beneath a full moon, a young boy witnesses",
+      "target_title": "Rurouni Kenshin: Meiji Kenkaku Romantan - Tsuioku-hen",
+      "target_mal_id": 44
+    },
+    {
+      "case_id": "manga-title-0275",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Asterisk",
+      "target_title": "Asterisk",
+      "target_mal_id": 3737
+    },
+    {
+      "case_id": "manga-title-0259",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "One Outs",
+      "target_title": "One Outs",
+      "target_mal_id": 11327
+    },
+    {
+      "case_id": "manga-keyword-0225",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Kim, Pyojun",
+      "target_title": "Press Play, Sami",
+      "target_mal_id": 173155
+    },
+    {
+      "case_id": "manga-title-0269",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Shinsetsu Ookami to Koushinryou",
+      "target_title": "Shinsetsu Ookami to Koushinryou: Ookami to Youhishi",
+      "target_mal_id": 99821
+    },
+    {
+      "case_id": "anime-semantic-0069",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where Dismissed as a hopeless loser by those around him, 27-year-old Arata Kaizaki bounces around from one job to another after quitting his first company. His unremarkable existence takes",
+      "target_title": "ReLIFE",
+      "target_mal_id": 30015
+    },
+    {
+      "case_id": "anime-semantic-0011",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where Cocoa visits her family, in the mountains, after quite some time again after her Mocha wrote her, through a letter, to come back soon. Her friends will have",
+      "target_title": "Gochuumon wa Usagi desu ka?? Dear My Sister",
+      "target_mal_id": 33280
+    },
+    {
+      "case_id": "manga-title-0268",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Hikaru no Go",
+      "target_title": "Hikaru no Go",
+      "target_mal_id": 20
+    },
+    {
+      "case_id": "manga-keyword-0233",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "series with character Fitzgerald, Zelda",
+      "target_title": "Bungou Stray Dogs",
+      "target_mal_id": 56529
+    },
+    {
+      "case_id": "anime-title-0114",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Kage no Jitsuryokusha ni Naritakute! 2nd Season",
+      "target_title": "Kage no Jitsuryokusha ni Naritakute! 2nd Season",
+      "target_mal_id": 54595
+    },
+    {
+      "case_id": "anime-semantic-0048",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: For the invincible and basically happy punk lads Hiroshi and Toru, what they care about every day is to get a lot of attention from girls and to",
+      "target_title": "Be-Bop Highschool",
+      "target_mal_id": 9645
+    },
+    {
+      "case_id": "manga-semantic-0164",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about Considered as the third installment in the highly popular When They Cry series by 07th Expansion, no Naku Koro ni takes place on the island of Rokkenjima, owned",
+      "target_title": "Umineko no Naku Koro ni",
+      "target_mal_id": 66517
+    },
+    {
+      "case_id": "manga-semantic-0183",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about Humanity, once a technologically advanced and thriving civilization, has been pushed to the brink of extinction following a cataclysmic war known as the Seven Days of Fire. The",
+      "target_title": "Kaze no Tani no Nausica\u00e4",
+      "target_mal_id": 651
+    },
+    {
+      "case_id": "anime-keyword-0079",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Magnolia, Daisy",
+      "target_title": "Violet Evergarden Movie",
+      "target_mal_id": 37987
+    },
+    {
+      "case_id": "manga-keyword-0231",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "series with character Kim, Jin-Hyeon",
+      "target_title": "Medical Return",
+      "target_mal_id": 147069
+    },
+    {
+      "case_id": "anime-semantic-0012",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about After one of his coworkers fails to repay a debt, apathetic bum Itou is pressured by loan sharks to settle the large sum of cash. Since has little",
+      "target_title": "Gyakkyou Burai Kaiji: Ultimate Survivor",
+      "target_mal_id": 3002
+    },
+    {
+      "case_id": "anime-title-0105",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Claymore",
+      "target_title": "Claymore",
+      "target_mal_id": 1818
+    },
+    {
+      "case_id": "manga-semantic-0166",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about Seika High School was an all-boys school, but it has since turned co-ed. Misaki Ayuzawa is the first female student council president of the school, eventually earning the",
+      "target_title": "Kaichou wa Maid-sama!",
+      "target_mal_id": 2921
+    },
+    {
+      "case_id": "manga-semantic-0194",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about Yoshio is a thirty-year-old shut-in with no job and no prospects, still living at home after all these years. His mundane life is suddenly interrupted when he receives",
+      "target_title": "Murazukuri Game no NPC ga Namami no Ningen to shika Omoenai",
+      "target_mal_id": 122783
+    },
+    {
+      "case_id": "anime-semantic-0039",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about A compilation film of the Courtesan of the Nation Arc, episodes 5\u20139 in the third season, featuring additional footage. The movie is a part of the \" 20th",
+      "target_title": "Gintama on Theater 2D: Ikkoku Keisei-hen",
+      "target_mal_id": 58091
+    },
+    {
+      "case_id": "anime-semantic-0063",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about Jinta Yadomi is peacefully living as a recluse, spending his days away from school and playing video games at home instead. One hot summer day, his childhood friend,",
+      "target_title": "Ano Hi Mita Hana no Namae wo Bokutachi wa Mada Shiranai.",
+      "target_mal_id": 9989
+    },
+    {
+      "case_id": "anime-semantic-0051",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where In the town of Clock Hill, there is an old boarding house called . While the residence itself is fairly normal, most of its occupants are not. Yuusaku",
+      "target_title": "Maison Ikkoku",
+      "target_mal_id": 1453
+    },
+    {
+      "case_id": "anime-semantic-0031",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about During an era of rapid industrial growth, humanity is beset by the emergence of a mysterious virus, capable of turning humans into mindless creatures called \"Kabane.\" With a",
+      "target_title": "Koutetsujou no Kabaneri Movie 1: Tsudou Hikari",
+      "target_mal_id": 33519
+    },
+    {
+      "case_id": "anime-title-0116",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Seikai no Senki II",
+      "target_title": "Seikai no Senki II",
+      "target_mal_id": 397
+    },
+    {
+      "case_id": "anime-semantic-0005",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Taking a break from the hustle and bustle of Tokyo, Souta Tawara returns to his hometown in Kagawa. Though his parents are no longer around, his former home",
+      "target_title": "Udon no Kuni no Kiniro Kemari",
+      "target_mal_id": 32673
+    },
+    {
+      "case_id": "manga-semantic-0196",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Akira Tachibana is a soft-spoken high school student who used to be a part of the track and field club but, due to an injury, she is no",
+      "target_title": "Koi wa Ameagari no You ni",
+      "target_mal_id": 88600
+    },
+    {
+      "case_id": "anime-semantic-0052",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: Second part of the Date A Bullet films.",
+      "target_title": "Date A Bullet: Nightmare or Queen",
+      "target_mal_id": 42423
+    },
+    {
+      "case_id": "manga-semantic-0187",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about As long as anyone can remember, there have been rumors of man-eating demons living in the woods. Even in the more enlightened Taishou era, the townspeople never go",
+      "target_title": "Kimetsu no Yaiba Novelize",
+      "target_mal_id": 160805
+    },
+    {
+      "case_id": "anime-semantic-0020",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about At the behest of the Queen, Earl Ciel Phantomhive hosts a lavish dinner party attended by several of the finest members of polite society\u2014as well as struggling author,",
+      "target_title": "Kuroshitsuji: Book of Murder",
+      "target_mal_id": 23317
+    },
+    {
+      "case_id": "manga-title-0250",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Maru Is a Puppy",
+      "target_title": "Maru Is a Puppy",
+      "target_mal_id": 162807
+    },
+    {
+      "case_id": "manga-semantic-0185",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Glory won over the roar of cannon fire, peace exists simply as a time to prepare for the next battle. A soldier in a militarily-advanced nation, quickly advanced",
+      "target_title": "Gunka no Baltzar",
+      "target_mal_id": 25855
+    },
+    {
+      "case_id": "anime-semantic-0044",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Kazuma Satou, former NEET and current reincarnated adventurer, finally returns home after the incident at the Crimson Demon village. He is joined by his ever-reliable companions: self-absorbed goddess",
+      "target_title": "Kono Subarashii Sekai ni Shukufuku wo! 3",
+      "target_mal_id": 49458
+    },
+    {
+      "case_id": "manga-semantic-0167",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about The sole thing that gets the middle-aged Sasaki through his soul-sucking job is a cheerful smile from Yamada\u2014the young woman who works at a nearby 24-hour supermarket he",
+      "target_title": "Super no Ura de Yani Suu Futari",
+      "target_mal_id": 148467
+    },
+    {
+      "case_id": "anime-semantic-0066",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where After the resolution of the debut, Kate and her Doll Emilico have officially become residents of the . However, they are under constant vigilance by the Star Bearers\u2014an",
+      "target_title": "Shadows House 2nd Season",
+      "target_mal_id": 49782
+    },
+    {
+      "case_id": "manga-semantic-0161",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about With a single, hopeful wish, young women can become magical girls and take on the thankless task of getting rid of the hidden chaos of the world. Despite",
+      "target_title": "Gekijouban Mahou Shoujo Madoka\u2605Magica: Shinpen - Hangyaku no Monogatari",
+      "target_mal_id": 62671
+    },
+    {
+      "case_id": "anime-semantic-0007",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: While the perfect getaway for most girls her age might be a fancy vacation with their loved ones, Rin Shima's ideal way of spending her days off is",
+      "target_title": "Yuru Camp\u25b3",
+      "target_mal_id": 34798
+    },
+    {
+      "case_id": "manga-title-0255",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Crayon Shin-chan",
+      "target_title": "Crayon Shin-chan",
+      "target_mal_id": 2435
+    },
+    {
+      "case_id": "anime-semantic-0061",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about Right before the volleyball club's training camp in Tokyo, both Shouyou Hinata and Tobio Kageyama fail a final exam. As the make-up exams and the trip overlap, the",
+      "target_title": "Haikyuu!! vs. \"Akaten\"",
+      "target_mal_id": 35806
+    },
+    {
+      "case_id": "manga-semantic-0195",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Ji-o's luck runs out when she gets injured before the tryouts for the national taekwondo team. In the middle of facing what seems to be the biggest crisis",
+      "target_title": "My Reason to Die",
+      "target_mal_id": 147502
+    },
+    {
+      "case_id": "anime-semantic-0013",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: Kayoko is a young girl in 1940, just starting first grade. She's a bit of a crybaby, which is no secret to those around her. She loves playing",
+      "target_title": "Ushiro no Shoumen Daare",
+      "target_mal_id": 2753
+    },
+    {
+      "case_id": "anime-semantic-0008",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Three years ago, a gateway between Earth and the opened in New York City, trapping extradimensional creatures and humans alike in an impermeable bubble. After the city's restoration,",
+      "target_title": "Kekkai Sensen & Beyond",
+      "target_mal_id": 34451
+    },
+    {
+      "case_id": "anime-semantic-0022",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Nekoma High School's volleyball team recruits a new member: the half-Japanese, half-Russian Lev Haiba. Though the self-proclaimed ace is blessed with great height, he lacks basic volleyball techniques.",
+      "target_title": "Haikyuu!! Lev Genzan!",
+      "target_mal_id": 25303
+    },
+    {
+      "case_id": "anime-title-0108",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Sasaki to Miyano",
+      "target_title": "Sasaki to Miyano: Koi ni Kizuku Mae no Chotto Shita Hanashi.",
+      "target_mal_id": 50672
+    },
+    {
+      "case_id": "manga-title-0270",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Shin Getter Robo",
+      "target_title": "Shin Getter Robo",
+      "target_mal_id": 8571
+    },
+    {
+      "case_id": "manga-semantic-0205",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Kokoro is a junior high school student\u2014but after years of bullying, she's become so anxious that she no longer goes to school. One day, she's pulled through her",
+      "target_title": "Kagami no Kojou",
+      "target_mal_id": 120658
+    },
+    {
+      "case_id": "manga-semantic-0145",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about In a world where many different species coexist, Takahashi inherits his father's youkai-exclusive apartment complex after he passes away. One day, Takahashi meets and instantly becomes attracted to",
+      "target_title": "Hitozukiai ga Nigate na Miboujin no Yukionna-san to Noroi no Yubiwa",
+      "target_mal_id": 138874
+    },
+    {
+      "case_id": "anime-title-0140",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Hunter x Hunter (2011)",
+      "target_title": "Hunter x Hunter (2011)",
+      "target_mal_id": 11061
+    },
+    {
+      "case_id": "manga-keyword-0238",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "series with character Chi Long",
+      "target_title": "Feng Shen Ji III",
+      "target_mal_id": 44711
+    },
+    {
+      "case_id": "manga-title-0262",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Omoide Emanon",
+      "target_title": "Omoide Emanon",
+      "target_mal_id": 17465
+    },
+    {
+      "case_id": "anime-semantic-0074",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: With the Inter-high over and as the end of summer approaches, Sakamichi trains intensely with Imaizumi Shunsuke and Naruko Shoukichi so he can carry on Team Sohoku\u2019s spirit",
+      "target_title": "Yowamushi Pedal Movie",
+      "target_mal_id": 30413
+    },
+    {
+      "case_id": "anime-title-0110",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Mashle",
+      "target_title": "Mashle",
+      "target_mal_id": 52211
+    },
+    {
+      "case_id": "anime-keyword-0093",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Chen, Pingan",
+      "target_title": "Jian Lai",
+      "target_mal_id": 59389
+    },
+    {
+      "case_id": "manga-title-0257",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "My Life as an Internet Novel",
+      "target_title": "My Life as an Internet Novel",
+      "target_mal_id": 127559
+    },
+    {
+      "case_id": "anime-semantic-0002",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where While countries such as France, England, and Germany all have their own internationally celebrated bread, simply does not have one that can match in reputation. Thus after discovering",
+      "target_title": "Yakitate!! Japan",
+      "target_mal_id": 28
+    },
+    {
+      "case_id": "anime-keyword-0084",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Girl in white dress",
+      "target_title": "Urusei Yatsura 2: Beautiful Dreamer",
+      "target_mal_id": 1921
+    },
+    {
+      "case_id": "manga-keyword-0216",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "series with character Shinozuka, Yuuko",
+      "target_title": "Life",
+      "target_mal_id": 407
+    },
+    {
+      "case_id": "anime-semantic-0026",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about As the younger brother of Japanese soccer star Seisuke Kanou, Kyousuke was always expected to grow as a soccer player at the same pace his brother did\u2014an expectation",
+      "target_title": "Hungry Heart: Wild Striker",
+      "target_mal_id": 17
+    },
+    {
+      "case_id": "anime-keyword-0096",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Munemura, Masayuki",
+      "target_title": "Saiki Kusuo no \u03a8-nan: \u03a8-shidou-hen",
+      "target_mal_id": 40542
+    },
+    {
+      "case_id": "anime-title-0103",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Tetsujin 28-gou (2004)",
+      "target_title": "Tetsujin 28-gou (2004)",
+      "target_mal_id": 2337
+    },
+    {
+      "case_id": "manga-semantic-0192",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Subaru Takahashi recalls the six months after his wife, Chika, was diagnosed with cancer.",
+      "target_title": "Daisuki na Tsuma Datta",
+      "target_mal_id": 140506
+    },
+    {
+      "case_id": "anime-semantic-0027",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about Far from the hustle and bustle of urban life, and with only a single candy store and bus route to its name, the rural Asahigaoka is certainly not",
+      "target_title": "Non Non Biyori Repeat",
+      "target_mal_id": 23623
+    },
+    {
+      "case_id": "manga-semantic-0149",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: It all started with the death of one of the Astronomy Club's members. From this, the rumored ghost of the club came to life. Grumpy insomniac Ganta Nakami",
+      "target_title": "Kimi wa Houkago Insomnia",
+      "target_mal_id": 121213
+    },
+    {
+      "case_id": "anime-title-0115",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Little Witch Academia (TV)",
+      "target_title": "Little Witch Academia (TV)",
+      "target_mal_id": 33489
+    },
+    {
+      "case_id": "manga-semantic-0177",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about really adores her parents, the loud-spoken alpha Akane Kuroga and the collected omega Aoi Shirosaki. However, despite the loving relationship these men have today, they were once just",
+      "target_title": "Shima-chan Chi no Tsugai Jijou",
+      "target_mal_id": 143063
+    },
+    {
+      "case_id": "anime-semantic-0062",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about With summer coming to an end, the girls are having as much fun as they can with their remaining time. However, their daily shenanigans are cut short when",
+      "target_title": "Non Non Biyori Movie: Vacation",
+      "target_mal_id": 36990
+    },
+    {
+      "case_id": "manga-keyword-0235",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "Hayasaka, Masato",
+      "target_title": "Kaguya-sama wa Kokurasetai: Tensai-tachi no Renai Zunousen",
+      "target_mal_id": 90125
+    },
+    {
+      "case_id": "manga-title-0243",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "My Broken Mariko",
+      "target_title": "My Broken Mariko",
+      "target_mal_id": 123812
+    },
+    {
+      "case_id": "anime-semantic-0036",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where After Wang Lin's arrival in the Ancient God Land, the Eternal Night Demon City in the Demon Cultivation Sea rose overnight, continuously attacking the surrounding sects. During the",
+      "target_title": "Xian Ni Movie: Shenlin Zhi Zhan",
+      "target_mal_id": 60279
+    },
+    {
+      "case_id": "anime-semantic-0042",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about The warship Aegis Destroyer is conducting public exercises in Maizuru Bay where, coincidentally, a suspicious foreign ship was recently spotted. Edogawa, Ran Mouri, Kogorou Mouri, Sonoko Suzuki, and",
+      "target_title": "Meitantei Conan Movie 17: Zekkai no Private Eye",
+      "target_mal_id": 14735
+    },
+    {
+      "case_id": "manga-semantic-0188",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about With a smirk, the mischievous middle school boy Nishikata glances over at , the girl seated next to him in class. He has just devised a master plan",
+      "target_title": "Karakai Jouzu no Takagi-san",
+      "target_mal_id": 78537
+    },
+    {
+      "case_id": "anime-keyword-0078",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "find title for Cannonball Maruyama",
+      "target_title": "Nomad: Megalo Box 2",
+      "target_mal_id": 40729
+    },
+    {
+      "case_id": "manga-semantic-0156",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: In the massively multiplayer online role-playing game Illusion, players reap extra benefits and profit from special events if they are in an in-game relationship. So when Lee Yeo-woon,",
+      "target_title": "Virtual Strangers",
+      "target_mal_id": 163877
+    },
+    {
+      "case_id": "manga-title-0267",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Kiss yori mo Hayaku",
+      "target_title": "Kiss yori mo Hayaku",
+      "target_mal_id": 3872
+    },
+    {
+      "case_id": "anime-semantic-0034",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about In a world where humanoid armored weapons known as \"Titatonostrider\" (\"TS\" for short) are used in warfare, troops from various countries converge on the island of Oahu, Hawaii,",
+      "target_title": "Yuuki Bakuhatsu Bang Bravern",
+      "target_mal_id": 55528
+    },
+    {
+      "case_id": "anime-semantic-0025",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where The third movie of a four-part finale of .",
+      "target_title": "Tamayura: Sotsugyou Shashin Part 3 - Akogare",
+      "target_mal_id": 29830
+    },
+    {
+      "case_id": "manga-semantic-0142",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about ! story revolves around the main protagonist Riki Naoe, a young male high school student. When Riki was a child, his parents died, leaving him hopeless and depressed.",
+      "target_title": "Little Busters!",
+      "target_mal_id": 8677
+    },
+    {
+      "case_id": "anime-semantic-0050",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where As a young child, Aizawa Yuuichi had often visited his cousin in the city; however, something drastic happened to keep him away for seven long years. Now, Yuuichi",
+      "target_title": "Kanon (2006)",
+      "target_mal_id": 1530
+    },
+    {
+      "case_id": "anime-title-0139",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Major: Message",
+      "target_title": "Major: Message",
+      "target_mal_id": 9890
+    },
+    {
+      "case_id": "manga-semantic-0178",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about Due to the overwhelming success of I Hear the Sunspot, the sequel has finally arrived, I Hear the Sunspot: Theory of Happiness! How will this \"more than friends,",
+      "target_title": "Hidamari ga Kikoeru: Koufukuron",
+      "target_mal_id": 112090
+    },
+    {
+      "case_id": "anime-title-0136",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Jinrui wa Suitai Shimashita",
+      "target_title": "Jinrui wa Suitai Shimashita",
+      "target_mal_id": 10357
+    },
+    {
+      "case_id": "anime-semantic-0019",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where Two men have just arrived at a location known as Quindecim and are unable to remember how they got there. They are immediately greeted by a young woman",
+      "target_title": "Death Billiards",
+      "target_mal_id": 14353
+    },
+    {
+      "case_id": "manga-semantic-0143",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Famous for his military service in the 39th Asian War, the legendary Swiss robot Montblanc is violently murdered. Humans and robots around the world mourn for the beloved",
+      "target_title": "Pluto",
+      "target_mal_id": 745
+    },
+    {
+      "case_id": "manga-semantic-0212",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about Thirty-five-year-old novelist Makio Koudai never had a good relationship with her older sister Minori, who always berated her for being different. Due to this, Makio is not stricken",
+      "target_title": "Ikoku Nikki",
+      "target_mal_id": 118804
+    },
+    {
+      "case_id": "anime-keyword-0090",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "find title for Kiyohumi, Haishima",
+      "target_title": "Free! Movie 5: The Final Stroke - Kouhen",
+      "target_mal_id": 48830
+    },
+    {
+      "case_id": "anime-title-0122",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Migi to Dali",
+      "target_title": "Migi to Dali",
+      "target_mal_id": 50586
+    },
+    {
+      "case_id": "manga-semantic-0203",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about In order to gain a professorship at Meishin University Center\u2014with the greater goal of reforming the corrupt Japanese system\u2014Dr. Akira Katou decides to focus her newest research paper",
+      "target_title": "Iryuu: Team Medical Dragon",
+      "target_mal_id": 1297
+    },
+    {
+      "case_id": "manga-title-0279",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Naruto Hiden Series",
+      "target_title": "Naruto Hiden Series",
+      "target_mal_id": 86129
+    },
+    {
+      "case_id": "manga-semantic-0153",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about When the war between the aboveground and underground ended, humanity was joined by so-called \" babies,\" those gifted with supernatural abilities and an obsession with the labyrinths below",
+      "target_title": "Dungeon Odyssey",
+      "target_mal_id": 152405
+    },
+    {
+      "case_id": "manga-semantic-0141",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where In a world where blue snow freezes everything it touches, humanity has long forgotten what warmth feels like. Seonu, a teenage boy with a prosthetic leg, carries the",
+      "target_title": "Footsteps in the Snow",
+      "target_mal_id": 180133
+    },
+    {
+      "case_id": "anime-semantic-0006",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where Gorou Honda has finally returned to Mifune East Junior High School, surprising his friends upon arrival. Now, Gorou is once again surrounded by those he holds closest, and",
+      "target_title": "Major S2",
+      "target_mal_id": 558
+    },
+    {
+      "case_id": "anime-semantic-0041",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about What was the tragedy that decided the fates of Char Aznable, the man later nicknamed the \"Red Comet\" as an ace pilot of the Zeon forces, and his",
+      "target_title": "Kidou Senshi Gundam: The Origin - Zenya Akai Suisei",
+      "target_mal_id": 39592
+    },
+    {
+      "case_id": "anime-keyword-0077",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "Karate Club Vice-Captain",
+      "target_title": "Mikadono Sanshimai wa Angai, Choroi.",
+      "target_mal_id": 59207
+    },
+    {
+      "case_id": "anime-title-0101",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "5-toubun no Hanayome Movie",
+      "target_title": "5-toubun no Hanayome Movie",
+      "target_mal_id": 48548
+    },
+    {
+      "case_id": "manga-title-0274",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Kimi wa Natsu no Naka",
+      "target_title": "Kimi wa Natsu no Naka",
+      "target_mal_id": 109330
+    },
+    {
+      "case_id": "manga-title-0271",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Suki na Ko ga Megane wo Wasureta",
+      "target_title": "Suki na Ko ga Megane wo Wasureta",
+      "target_mal_id": 117332
+    },
+    {
+      "case_id": "anime-semantic-0014",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about When humanity was oppressed by mysterious foes known as the Celestial Hosts, five exceptional mages joined forces to defeat them. In fear that these formidable enemies would return,",
+      "target_title": "Tsue to Tsurugi no Wistoria",
+      "target_mal_id": 58059
+    },
+    {
+      "case_id": "manga-keyword-0230",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "series with character Former Mother-In-Law",
+      "target_title": "Arte",
+      "target_mal_id": 75929
+    },
+    {
+      "case_id": "anime-semantic-0054",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about One fateful day, Yuusuke Urameshi, a 14-year-old delinquent with a dim future, gets a miraculous chance to turn it all around when he throws himself in front of",
+      "target_title": "Yuu\u2606Yuu\u2606Hakusho",
+      "target_mal_id": 392
+    },
+    {
+      "case_id": "anime-semantic-0040",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: Kiki, a 13-year-old witch-in-training, must spend a year living on her own in a distant town in order to become a full-fledged witch. Leaving her family and friends,",
+      "target_title": "Majo no Takkyuubin",
+      "target_mal_id": 512
+    },
+    {
+      "case_id": "anime-keyword-0086",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "find title for Machida, Kouji",
+      "target_title": "Youkoso Jitsuryoku Shijou Shugi no Kyoushitsu e 2nd Season",
+      "target_mal_id": 51096
+    },
+    {
+      "case_id": "manga-semantic-0208",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about A youth romantic drama with themes of growing up, the story focuses on college student Tsuneo and dreamer , who lives her life stuck in a wheelchair. \u2014named",
+      "target_title": "Josee to Tora to Sakana-tachi",
+      "target_mal_id": 130661
+    },
+    {
+      "case_id": "manga-title-0245",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Rasetsu no Hana",
+      "target_title": "Rasetsu no Hana",
+      "target_mal_id": 3636
+    },
+    {
+      "case_id": "manga-keyword-0227",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Geumryong, Jin",
+      "target_title": "Return of the Blossoming Blade",
+      "target_mal_id": 146878
+    },
+    {
+      "case_id": "anime-title-0127",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Flip Flappers",
+      "target_title": "Flip Flappers",
+      "target_mal_id": 32979
+    },
+    {
+      "case_id": "anime-semantic-0056",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about One night, Mikado Ryuugamine accepts an invitation to Shinra Kishitani's apartment, eager to talk to Celty as quite some time has passed since the two last spoke. But,",
+      "target_title": "Durarara!!x2 Shou: Watashi no Kokoro wa Nabe Moyou",
+      "target_mal_id": 30191
+    },
+    {
+      "case_id": "manga-semantic-0162",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about In the aftermath of the disclosure game that won two Mahjong anomalies, the villainy \"17 steps\" game, Kazuya sets forth a gamble of 2,000,000,000 Yen! How will survive?!",
+      "target_title": "Tobaku Datenroku Kaiji: One Poker-hen",
+      "target_mal_id": 61579
+    },
+    {
+      "case_id": "anime-title-0123",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Major S5",
+      "target_title": "Major S5",
+      "target_mal_id": 5028
+    },
+    {
+      "case_id": "manga-keyword-0217",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Fujimaru, Yukari",
+      "target_title": "Penguin Kakumei",
+      "target_mal_id": 926
+    },
+    {
+      "case_id": "anime-semantic-0071",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where Whenever he is not getting pummeled in the karate club after school, high schooler Shirahama can be found with his head buried in one of the many self-help",
+      "target_title": "Shijou Saikyou no Deshi Kenichi",
+      "target_mal_id": 1559
+    },
+    {
+      "case_id": "anime-semantic-0032",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about In Raja, a small country located to the west of Tempest. Rimuru and his companions get involved in a long-running conspiracy that swirls around the mysterious power of",
+      "target_title": "Tensei shitara Slime Datta Ken Movie: Guren no Kizuna-hen",
+      "target_mal_id": 49877
+    },
+    {
+      "case_id": "anime-title-0129",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Majin Tantei Nougami Neuro",
+      "target_title": "Majin Tantei Nougami Neuro",
+      "target_mal_id": 2985
+    },
+    {
+      "case_id": "manga-semantic-0209",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: When Ji Wonyoung's superior is fired in a corruption scandal, the young man finds himself caught up in the mess and is unjustly suspended from the company. Seeking",
+      "target_title": "Unintentional Love Story",
+      "target_mal_id": 145605
+    },
+    {
+      "case_id": "manga-semantic-0202",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about There is a legend that tells of how the world was almost destroyed thousands of years ago by the queen after she unleashed her latent powers. Despite their",
+      "target_title": "Vampire Juujikai",
+      "target_mal_id": 976
+    },
+    {
+      "case_id": "manga-semantic-0179",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Midori's mother has finally acquired her dream home, but it isn't long before supernatural phenomena disrupt the peace of the family. And if unexplained electricity failures, strange phone",
+      "target_title": "Ghost Hunt: Akumu no Sumu Ie",
+      "target_mal_id": 41697
+    },
+    {
+      "case_id": "anime-semantic-0009",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: At Suimei High, the -sou dormitory is infamous for housing the school's most notorious delinquents. Thus, when the relatively tame Sorata Kanda is transferred to the dorm, escaping",
+      "target_title": "Sakura-sou no Pet na Kanojo",
+      "target_mal_id": 13759
+    },
+    {
+      "case_id": "manga-title-0256",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Tenkaichi: Nihon Saikyou Bugeisha Ketteisen",
+      "target_title": "Tenkaichi: Nihon Saikyou Bugeisha Ketteisen",
+      "target_mal_id": 139395
+    },
+    {
+      "case_id": "manga-semantic-0180",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Park Hyung Suk has spent all 17 years of his life at the bottom of the food chain. Short, overweight, and unattractive, he is used to being bullied",
+      "target_title": "Lookism",
+      "target_mal_id": 111202
+    },
+    {
+      "case_id": "anime-semantic-0073",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: As she heads off to her entrance ceremony at Sainotama Girls' High School, Akane Kikuchi muses over her grade school dream of becoming a manga artist and the",
+      "target_title": "Joshikousei no Mudazukai",
+      "target_mal_id": 38619
+    },
+    {
+      "case_id": "manga-title-0249",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Mushoku Tensei: Dasoku",
+      "target_title": "Mushoku Tensei: Dasoku-hen",
+      "target_mal_id": 159387
+    },
+    {
+      "case_id": "manga-title-0280",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Fool Night",
+      "target_title": "Fool Night",
+      "target_mal_id": 135264
+    },
+    {
+      "case_id": "anime-title-0117",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Initial D Battle Stage",
+      "target_title": "Initial D Battle Stage",
+      "target_mal_id": 821
+    },
+    {
+      "case_id": "manga-semantic-0175",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about Ikki Kurogane is a Blazer, a person who can materialize his soul as a weapon. Unlike most Blazers, however, his aptitude for magic is virtually nonexistent. Branded a",
+      "target_title": "Rakudai Kishi no Cavalry",
+      "target_mal_id": 57201
+    },
+    {
+      "case_id": "anime-title-0128",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "City Hunter",
+      "target_title": "City Hunter",
+      "target_mal_id": 1470
+    },
+    {
+      "case_id": "manga-semantic-0193",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about Despite the law that forbids human entry, one young witch seeks refuge in the world of demons. Upon arrival, the witch meets the traveling merchant Simon, who decides",
+      "target_title": "Nicola no Oyururi Makai Kikou",
+      "target_mal_id": 105399
+    },
+    {
+      "case_id": "anime-keyword-0076",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Tian, Yong",
+      "target_title": "Kingdom 5th Season",
+      "target_mal_id": 53223
+    },
+    {
+      "case_id": "anime-semantic-0038",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about In future Japan, in a time when android housekeepers have become commonplace, society strictly abides by the Three Laws of Robotics, which all androids must follow. Under the",
+      "target_title": "Eve no Jikan",
+      "target_mal_id": 3167
+    },
+    {
+      "case_id": "manga-semantic-0214",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about After rigorously training for three years, the ordinary Saitama has gained immense strength which allows him to take out anyone and anything with just one . He decides",
+      "target_title": "One Punch-Man",
+      "target_mal_id": 44347
+    },
+    {
+      "case_id": "anime-title-0118",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Ao Haru Ride",
+      "target_title": "Ao Haru Ride",
+      "target_mal_id": 21995
+    },
+    {
+      "case_id": "manga-semantic-0206",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about The world through a cat's perspective is limited to the colors of blue, yellow, black, and white. Due to this condition, the feline Hachi has found life monotonous",
+      "target_title": "Monotone Blue",
+      "target_mal_id": 132923
+    },
+    {
+      "case_id": "anime-semantic-0003",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where Miyu is an 8th grade girl, whose parents have been hired by NASA. They take off to America leaving Miyu with Mr. Saionji. Later, Mr. Saionji decides to",
+      "target_title": "Daa! Daa! Daa!",
+      "target_mal_id": 233
+    },
+    {
+      "case_id": "anime-title-0102",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "K-On!",
+      "target_title": "K-On!",
+      "target_mal_id": 5680
+    },
+    {
+      "case_id": "anime-semantic-0028",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: Seeking to restore humanity's diminishing hope, the Survey Corps embark on a mission to retake Wall Maria, where the battle against the merciless \"Titans\" takes the stage once",
+      "target_title": "Shingeki no Kyojin Season 3 Part 2",
+      "target_mal_id": 38524
+    },
+    {
+      "case_id": "anime-semantic-0057",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where It's time for battle! It's time for excitement! It's time for thrills! \"This trial has a 98% mortality rate.\" \"Then... I'll eliminate everyone who threatens my life.\" Luo",
+      "target_title": "Tunshi Xingkong Movie: Xueluo Dalu",
+      "target_mal_id": 59939
+    },
+    {
+      "case_id": "manga-keyword-0232",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "Nawashiro, Yasuko",
+      "target_title": "Akebi-chan no Sailor-fuku",
+      "target_mal_id": 101851
+    },
+    {
+      "case_id": "manga-semantic-0155",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about After dropping out of middle school following the spread of rumors that shattered his reputation and confidence, 16-year-old Nakaba Endou has become a NEET. He spends his days",
+      "target_title": "Conveni-kun.",
+      "target_mal_id": 26324
+    },
+    {
+      "case_id": "manga-semantic-0170",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Life isn't always perfect, but love certainly makes it better. The exciting tale of young love continues a year following the story of Blossom. Bomi and her university",
+      "target_title": "Seasons of Lovesome",
+      "target_mal_id": 173072
+    },
+    {
+      "case_id": "anime-title-0134",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Yuru Yuri Nachuyachumi!",
+      "target_title": "Yuru Yuri Nachuyachumi!",
+      "target_mal_id": 23225
+    },
+    {
+      "case_id": "manga-semantic-0215",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: There are animals that were abandoned by and live secretly in the human world. Narae, an ordinary high school student, discovers their existence... A modern version of Beauty",
+      "target_title": "Legend of Dangun",
+      "target_mal_id": 170364
+    },
+    {
+      "case_id": "manga-semantic-0174",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about Ayumu Narumi has lived all his life in the shadow of his famous detective brother, Kiyotaka. However, Kiyotaka disappeared two years ago, leaving behind his wife Madoka and",
+      "target_title": "Spiral: Suiri no Kizuna",
+      "target_mal_id": 534
+    },
+    {
+      "case_id": "anime-keyword-0094",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Hotaka, Takamichi",
+      "target_title": "Kaijuu 8-gou",
+      "target_mal_id": 52588
+    },
+    {
+      "case_id": "manga-semantic-0198",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about An inexplicable catastrophe plunges Japan at the bottom of the sea. A boy survives misfortune, but he has been abandoned in a land surrounded by seas on all",
+      "target_title": "Survival",
+      "target_mal_id": 17927
+    },
+    {
+      "case_id": "anime-keyword-0082",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "Capulet, Juliet Fiammata Asto",
+      "target_title": "Romeo x Juliet",
+      "target_mal_id": 1699
+    },
+    {
+      "case_id": "manga-title-0273",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Tenshi Nanka ja Nai",
+      "target_title": "Tenshi Nanka ja Nai",
+      "target_mal_id": 1496
+    },
+    {
+      "case_id": "anime-keyword-0100",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "Sannes, Djel",
+      "target_title": "Shingeki no Kyojin Season 3 Specials",
+      "target_mal_id": 39477
+    },
+    {
+      "case_id": "manga-title-0261",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "SQ: Begin W/Your Name!",
+      "target_title": "SQ: Begin W/Your Name!",
+      "target_mal_id": 93516
+    },
+    {
+      "case_id": "anime-title-0138",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Tsuki ga Michibiku Isekai Douchuu",
+      "target_title": "Tsuki ga Michibiku Isekai Douchuu",
+      "target_mal_id": 43523
+    },
+    {
+      "case_id": "manga-keyword-0221",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Tabikamo, Nagare",
+      "target_title": "Poputepipikku",
+      "target_mal_id": 95016
+    },
+    {
+      "case_id": "anime-semantic-0016",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about With Aria Company closed for the day and her friends attending to other matters, Akari Mizunashi seizes this rare opportunity to go on a casual outing around Neo-Venezia",
+      "target_title": "Aria the Origination: Sono Choppiri Himitsu no Basho ni...",
+      "target_mal_id": 4772
+    },
+    {
+      "case_id": "anime-keyword-0080",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "find title for Sanada, Genichirou",
+      "target_title": "Tennis no Oujisama: Another Story - Kako to Mirai no Message",
+      "target_mal_id": 5751
+    },
+    {
+      "case_id": "anime-semantic-0001",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: Cao Yanbing and his group are framed by the God Martial Spirit Legion led by Huangfu Longdou after the destruction of the Reed Catkins Tower, and they are",
+      "target_title": "Zhen Hun Jie 4th Season",
+      "target_mal_id": 59969
+    },
+    {
+      "case_id": "manga-title-0241",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Houseki no Kuni",
+      "target_title": "Houseki no Kuni",
+      "target_mal_id": 44489
+    },
+    {
+      "case_id": "manga-title-0258",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "About Death",
+      "target_title": "About Death",
+      "target_mal_id": 50027
+    },
+    {
+      "case_id": "manga-title-0253",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Shinai naru Boku e Satsui wo Komete",
+      "target_title": "Shinai naru Boku e Satsui wo Komete",
+      "target_mal_id": 115746
+    },
+    {
+      "case_id": "anime-keyword-0081",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "Suppression Forces Messenger",
+      "target_title": "Kidou Senshi Gundam: Dai 08 MS Shoutai",
+      "target_mal_id": 81
+    },
+    {
+      "case_id": "anime-semantic-0033",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about The final battle for the Guardians begins as they face Iron Mouse, Aluminum Siren, Lead Crow, Tin Nyanko and more. (",
+      "target_title": "Bishoujo Senshi Sailor Moon Cosmos Movie",
+      "target_mal_id": 51716
+    },
+    {
+      "case_id": "anime-keyword-0095",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "find title for Valentine, Luminous",
+      "target_title": "Tensei shitara Slime Datta Ken: Coleus no Yume",
+      "target_mal_id": 54565
+    },
+    {
+      "case_id": "manga-semantic-0147",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about Kou Kitamura is a fifth grader whose family runs a sporting goods store. One of the regular customers of his family's store is the Tsukishima Batting Center, and",
+      "target_title": "Cross Game",
+      "target_mal_id": 1183
+    },
+    {
+      "case_id": "manga-keyword-0228",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "Makino, Takezou",
+      "target_title": "Higurashi no Naku Koro ni - Dai 4-wa: Himatsubushi-hen",
+      "target_mal_id": 77467
+    },
+    {
+      "case_id": "manga-title-0242",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "xxxHOLiC: Rei",
+      "target_title": "xxxHOLiC: Rei",
+      "target_mal_id": 46010
+    },
+    {
+      "case_id": "anime-semantic-0049",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Monkey D. Luffy and his Straw Hat Crew have finally arrived on Gran Tesoro, a ship carrying the largest entertainment city in the world. Drawn in by the",
+      "target_title": "One Piece Film: Gold",
+      "target_mal_id": 31490
+    },
+    {
+      "case_id": "manga-semantic-0152",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about The online game Glory has gained such popularity in China that the best players in the Glory Professional Alliance are known as gods by the fans. But among",
+      "target_title": "Quanzhi Gaoshou",
+      "target_mal_id": 120455
+    },
+    {
+      "case_id": "manga-semantic-0190",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where Much of the damage attributed to \"Vash\" is caused by the activities of bounty hunters who are after the 60,000,000,000$$ (sixty billion \"double dollars\") reward on Vash's head",
+      "target_title": "Trigun",
+      "target_mal_id": 703
+    },
+    {
+      "case_id": "manga-title-0246",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "A Good Day to Be a Dog",
+      "target_title": "A Good Day to Be a Dog",
+      "target_mal_id": 119024
+    },
+    {
+      "case_id": "manga-keyword-0226",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Suruga, Hideaki",
+      "target_title": "L Change the WorLd",
+      "target_mal_id": 8158
+    },
+    {
+      "case_id": "anime-semantic-0029",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where Long ago, there was a monk named Myoue who could bring anything he drew to life. He quietly lived with his wife Koto\u2014a black rabbit in human form\u2014and",
+      "target_title": "Kyousou Giga (TV)",
+      "target_mal_id": 19703
+    },
+    {
+      "case_id": "anime-semantic-0023",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: The Funny-face Club are technically high students, but that's where the normal part ends. The five members (Rei Ichidou, Gou Reietsu, Kiyoshi Shusse, Dai Monohoshi, and Jin Daima)",
+      "target_title": "High School! Kimengumi",
+      "target_mal_id": 714
+    },
+    {
+      "case_id": "anime-semantic-0075",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where When Gintoki apprehends a pirate at a premiere, he checks the camera's footage and finds himself transported to a bleak, post-apocalyptic version of Edo, where a mysterious epidemic",
+      "target_title": "Gintama Movie 2: Kanketsu-hen - Yorozuya yo Eien Nare",
+      "target_mal_id": 15335
+    },
+    {
+      "case_id": "anime-semantic-0030",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about Ever since horse girl Oguri Cap left the small town of Kasamatsu to chase greater heights in Tokyo, she has rapidly gained attention with her remarkable results. Her",
+      "target_title": "Uma Musume: Cinderella Gray Part 2",
+      "target_mal_id": 61930
+    },
+    {
+      "case_id": "anime-semantic-0067",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about is a two-episode OVA continues onwards from the previous set of OVAs of .",
+      "target_title": "Ichigo Mashimaro Encore",
+      "target_mal_id": 4811
+    },
+    {
+      "case_id": "manga-title-0254",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Comic Showa",
+      "target_title": "Comic Showa-shi",
+      "target_mal_id": 21040
+    },
+    {
+      "case_id": "manga-title-0277",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Sayonara Piano Sonata",
+      "target_title": "Sayonara Piano Sonata",
+      "target_mal_id": 25609
+    },
+    {
+      "case_id": "manga-semantic-0207",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about Series of various side stories of Dogs manga.",
+      "target_title": "Bungou Stray Dogs",
+      "target_mal_id": 98380
+    },
+    {
+      "case_id": "anime-title-0112",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Karakai Jouzu no Takagi-san 3",
+      "target_title": "Karakai Jouzu no Takagi-san 3",
+      "target_mal_id": 49721
+    },
+    {
+      "case_id": "manga-keyword-0220",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Aurousseau, Lambert",
+      "target_title": "Watashi no Oshi wa Akuyaku Reijou.",
+      "target_mal_id": 129361
+    },
+    {
+      "case_id": "manga-title-0264",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Uchi no Musuko wa Tabun Gay",
+      "target_title": "Uchi no Musuko wa Tabun Gay",
+      "target_mal_id": 122880
+    },
+    {
+      "case_id": "manga-semantic-0201",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about The relationship of our main characters is question by Yukimura Shuji himself wondering what type of relationship he have with his partner Shinonome Ryuichi. Find out what's going",
+      "target_title": "Kare ja Nai kedo",
+      "target_mal_id": 26606
+    },
+    {
+      "case_id": "manga-title-0276",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Hana wa Saku ka",
+      "target_title": "Hana wa Saku ka",
+      "target_mal_id": 19594
+    },
+    {
+      "case_id": "manga-title-0266",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Nijiiro Days",
+      "target_title": "Nijiiro Days",
+      "target_mal_id": 39291
+    },
+    {
+      "case_id": "anime-keyword-0098",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Mikoto's Father",
+      "target_title": "School Rumble Ni Gakki",
+      "target_mal_id": 846
+    },
+    {
+      "case_id": "manga-semantic-0186",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "series where takes place in Tokyo in the 22nd century. The protagonist of the story is Kuroemon, a cat robot of the same type as and the captain and team",
+      "target_title": "Dorabase: Doraemon Super Baseball Gaiden",
+      "target_mal_id": 22520
+    },
+    {
+      "case_id": "manga-semantic-0189",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: As part of a ruthless program by the totalitarian government, ninth-grade students are taken to a small isolated island with a map, food, and various weapons. Forced to",
+      "target_title": "Battle Royale",
+      "target_mal_id": 117586
+    },
+    {
+      "case_id": "manga-semantic-0191",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about In the land of Amberground, an artificial sun serves as the only source of light for the capital city of Akatsuki while an eternal night persists. The further",
+      "target_title": "Tegamibachi",
+      "target_mal_id": 1709
+    },
+    {
+      "case_id": "manga-semantic-0184",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about A long time ago, humanity stumbled upon magical creatures called Majik. To acquire the powers of a Majik, one has to pass a trial set by the being",
+      "target_title": "Madan no Ichi",
+      "target_mal_id": 173944
+    },
+    {
+      "case_id": "manga-keyword-0234",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "series with character Hinoki, Shunpei",
+      "target_title": "Futari Bus",
+      "target_mal_id": 188470
+    },
+    {
+      "case_id": "anime-keyword-0097",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "Momozono, Kumimi",
+      "target_title": "Kamisama Hajimemashita\u25ce",
+      "target_mal_id": 25681
+    },
+    {
+      "case_id": "manga-title-0272",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Asumi-chan wa Lesbian Fuuzoku ni Kyoumi ga Arimasu!",
+      "target_title": "Asumi-chan wa Lesbian Fuuzoku ni Kyoumi ga Arimasu!",
+      "target_mal_id": 130126
+    },
+    {
+      "case_id": "manga-semantic-0165",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Ryuk, a god of , drops his Note into the human world for personal pleasure. In Japan, prodigious high school student Light Yagami stumbles upon it. Inside the",
+      "target_title": "Death Note",
+      "target_mal_id": 21
+    },
+    {
+      "case_id": "anime-semantic-0017",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "what title is about Atop a hill overlooking a seaside port sits a boarding house named Manor. Since the building is run by her family, Umi Matsuzaki carries out many of the",
+      "target_title": "Coquelicot-zaka kara",
+      "target_mal_id": 10029
+    },
+    {
+      "case_id": "manga-semantic-0154",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Mahiro Oyama was just a normal erotic-game loving dude...until he woke up one morning as a woman! Turns out his mad-scientist little sister, Mihari, tried out one of",
+      "target_title": "Oniichan wa Oshimai!",
+      "target_mal_id": 112592
+    },
+    {
+      "case_id": "manga-keyword-0237",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Ifrikia, Livius Orvinus",
+      "target_title": "Soredemo Sekai wa Utsukushii",
+      "target_mal_id": 41847
+    },
+    {
+      "case_id": "manga-title-0265",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Nitamono Doushi",
+      "target_title": "Nitamono Doushi",
+      "target_mal_id": 186195
+    },
+    {
+      "case_id": "manga-semantic-0148",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about Twenty-Fifth Bam had been alone his whole life until he met Rachel. Now, however, Rachel is set on climbing the , and she is willing to leave Bam",
+      "target_title": "Tower of God",
+      "target_mal_id": 122663
+    },
+    {
+      "case_id": "manga-keyword-0239",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "Nakamura, Utako",
+      "target_title": "Joshikousei no Mudazukai",
+      "target_mal_id": 98607
+    },
+    {
+      "case_id": "anime-semantic-0058",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about From out of nowhere, a mysterious alien race known as the Boazan Forces has invaded the Earth. A group of individuals specially trained to handle this kind of",
+      "target_title": "Chou Denji Machine Voltes V",
+      "target_mal_id": 1069
+    },
+    {
+      "case_id": "manga-keyword-0224",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Tsukimoto, Makoto",
+      "target_title": "Ping Pong",
+      "target_mal_id": 5744
+    },
+    {
+      "case_id": "manga-semantic-0171",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "manga or anime about The Social Welfare Agency in Italy is not what it seems. Yes, it rescues young girls who have been brutalized, but it then brainwashes them and turns them",
+      "target_title": "Gunslinger Girl",
+      "target_mal_id": 649
+    },
+    {
+      "case_id": "anime-semantic-0047",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Great Britain is ablaze with news of a so-called \"Lord of Crime,\" a criminal mastermind responsible for the downfall of several unruly nobles. In truth, the Lord of",
+      "target_title": "Yuukoku no Moriarty Part 2",
+      "target_mal_id": 43325
+    },
+    {
+      "case_id": "manga-title-0252",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "3-gatsu no Lion",
+      "target_title": "3-gatsu no Lion",
+      "target_mal_id": 1224
+    },
+    {
+      "case_id": "anime-semantic-0070",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Whether it is investigating stone shrines, tracking rumors, or simply playing hide and seek, Koyomi Araragi is always there to fulfill the requests of his friends from both",
+      "target_title": "Koyomimonogatari",
+      "target_mal_id": 32268
+    },
+    {
+      "case_id": "anime-semantic-0064",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about The second movie of a four-part finale of .",
+      "target_title": "Tamayura: Sotsugyou Shashin Part 2 - Hibiki",
+      "target_mal_id": 29829
+    },
+    {
+      "case_id": "manga-title-0244",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "19 Tian",
+      "target_title": "19 Tian",
+      "target_mal_id": 116312
+    },
+    {
+      "case_id": "anime-title-0132",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Iribitari Gal ni Ma\u3007ko Tsukawasete Morau Hanashi",
+      "target_title": "Iribitari Gal ni Ma\u3007ko Tsukawasete Morau Hanashi",
+      "target_mal_id": 59407
+    },
+    {
+      "case_id": "anime-title-0113",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Taiho Shichau zo The Movie",
+      "target_title": "Taiho Shichau zo The Movie",
+      "target_mal_id": 2013
+    },
+    {
+      "case_id": "manga-semantic-0144",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "what title is about Eri is the childhood friend we always spent time with. Someday I won't love her as a friend, but I'll never tell her that. Because I want to",
+      "target_title": "Kono Koi wo Hoshi ni wa Negawanai",
+      "target_mal_id": 160302
+    },
+    {
+      "case_id": "manga-semantic-0197",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: The manga centers on the titular , the lord of all magical beasts, who wields both uncanny intellect and destructive power. Bothered by the 13 heroes tasked to",
+      "target_title": "Clevatess: Majuu no Ou to Akago to Shikabane no Yuusha",
+      "target_mal_id": 138396
+    },
+    {
+      "case_id": "manga-semantic-0168",
+      "medium": "manga",
+      "query_type": "semantic",
+      "query": "story with this vibe: Zig\u2014a tall, broad-shouldered mercenary\u2014participates in a witch hunt. Following a fierce duel with the deadly witch, he becomes privy to her desire. \"I want you to protect me,\"",
+      "target_title": "Majo to Youhei",
+      "target_mal_id": 166626
+    },
+    {
+      "case_id": "anime-keyword-0083",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Steel, Steven",
+      "target_title": "Steel Ball Run: JoJo no Kimyou na Bouken",
+      "target_mal_id": 61469
+    },
+    {
+      "case_id": "anime-semantic-0015",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "series where The Band of the Hawk has dwindled in the year since Guts left them on his journey to forge his own destiny. Unaware of their fate, Guts returns",
+      "target_title": "Berserk: Ougon Jidai-hen III - Kourin",
+      "target_mal_id": 12115
+    },
+    {
+      "case_id": "manga-keyword-0223",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "series with character Tasmeria, Leticia",
+      "target_title": "Koushaku Reijou no Tashinami",
+      "target_mal_id": 97579
+    },
+    {
+      "case_id": "anime-semantic-0055",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: Spirits have always been attracted to Keitarou Gentouga due to his strong spiritual presence. A traumatic encounter with one had caused his right hand to be cursed, forcing",
+      "target_title": "Dark Gathering",
+      "target_mal_id": 52505
+    },
+    {
+      "case_id": "anime-semantic-0046",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "story with this vibe: A new short animation for the series that debuted at the \":30+; 30th ANN/VERSARY OF \" fes. in Yokohama Arena. Two Asuka Langleys from different timelines host a",
+      "target_title": "Evangelion: Housou 30-shuunen Kinen Tokubetsu Kougyou",
+      "target_mal_id": 63392
+    },
+    {
+      "case_id": "anime-keyword-0088",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "series with character Ichimiya, Taishi",
+      "target_title": "Servant x Service",
+      "target_mal_id": 18119
+    },
+    {
+      "case_id": "anime-title-0109",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Carole & Tuesday",
+      "target_title": "Carole & Tuesday",
+      "target_mal_id": 37435
+    },
+    {
+      "case_id": "anime-title-0125",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Da Wang Rao Ming 2",
+      "target_title": "Da Wang Rao Ming 2",
+      "target_mal_id": 51898
+    },
+    {
+      "case_id": "anime-title-0124",
+      "medium": "anime",
+      "query_type": "title",
+      "query": "Yofukashi no Uta",
+      "target_title": "Yofukashi no Uta",
+      "target_mal_id": 50346
+    },
+    {
+      "case_id": "manga-title-0247",
+      "medium": "manga",
+      "query_type": "title",
+      "query": "Hypnosis Mic: Before the Battle - The Dirty Dawg",
+      "target_title": "Hypnosis Mic: Before the Battle - The Dirty Dawg",
+      "target_mal_id": 117044
+    },
+    {
+      "case_id": "anime-semantic-0060",
+      "medium": "anime",
+      "query_type": "semantic",
+      "query": "manga or anime about Round 3 of the MFG competition is heating up on the final race day at the Peninsula Manazuru track. Despite starting at the very front of the pack,",
+      "target_title": "MF Ghost 3rd Season",
+      "target_mal_id": 60602
+    },
+    {
+      "case_id": "manga-keyword-0229",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "series with character Kandinsky, Stanislav",
+      "target_title": "Black Lagoon",
+      "target_mal_id": 22699
+    },
+    {
+      "case_id": "anime-keyword-0087",
+      "medium": "anime",
+      "query_type": "keyword",
+      "query": "Chazawa, Shinsuke",
+      "target_title": "Shirobako",
+      "target_mal_id": 25835
+    },
+    {
+      "case_id": "manga-keyword-0240",
+      "medium": "manga",
+      "query_type": "keyword",
+      "query": "find title for Xia, Yu Fan",
+      "target_title": "Full Metal Panic!",
+      "target_mal_id": 10892
+    }
+  ]
+}

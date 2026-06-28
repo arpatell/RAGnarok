@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { ApiRequestError, fetchJikanMangaChapterCount, fetchSuggestions, ingestChapter, relayImageUrl } from "../lib/api";
+import {
+  ApiRequestError,
+  fetchJikanMangaChapterCount,
+  fetchJikanMangaRecommendations,
+  ingestChapter,
+  relayImageUrl
+} from "../lib/api";
 import { isImageLoaded, isImageLoading, preloadImageOnce } from "../lib/imagePreload";
 import {
   addBookmark,
@@ -701,17 +707,21 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
 
         setBookmarks(getBookmarks());
 
-        fetchSuggestions(result.series.title, result.series.genres, result.sourceAdapter)
-          .then((payload) => {
-            if (!cancelled) {
-              setSuggestions(payload);
-            }
-          })
-          .catch(() => {
-            if (!cancelled) {
-              setSuggestions(null);
-            }
-          });
+        if (typeof window !== "undefined" && window.innerWidth <= MOBILE_BREAKPOINT) {
+          setSuggestions(null);
+        } else {
+          fetchJikanMangaRecommendations(result.series.title)
+            .then((payload) => {
+              if (!cancelled) {
+                setSuggestions(payload);
+              }
+            })
+            .catch(() => {
+              if (!cancelled) {
+                setSuggestions(null);
+              }
+            });
+        }
       } catch (requestError) {
         if (!cancelled) {
           const message = requestError instanceof Error ? requestError.message : "Failed to ingest chapter.";
@@ -1372,7 +1382,7 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
           currentChapterUrl={chapterUrl}
           filterQuery={chapterFilter}
           navigationStatus={chapterNavigationStatus}
-          suggestions={suggestions}
+          suggestions={isMobileViewport ? null : suggestions}
           bookmarks={bookmarks}
           hasReadChapter={hasReadChapter}
           onFilterQueryChange={setChapterFilter}
