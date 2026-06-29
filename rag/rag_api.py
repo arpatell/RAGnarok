@@ -22,6 +22,7 @@ from pinecone import Pinecone
 from pinecone_text.sparse import BM25Encoder
 
 LOGGER = logging.getLogger("rag_api")
+LOGGER.setLevel(logging.INFO)
 JIKAN_BASE_URL = "https://api.jikan.moe/v4"
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 SPINOFF_TITLE_MARKERS = (

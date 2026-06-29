@@ -121,6 +121,10 @@ function toDisplayTypeLabel(result: RagSearchResult): string {
   return "Manga";
 }
 
+function isAnimeResult(result: RagSearchResult): boolean {
+  return (result.media_type || "").trim().toLowerCase() === "anime";
+}
+
 function handleResultImageError(event: React.SyntheticEvent<HTMLImageElement>): void {
   const image = event.currentTarget;
   const directSrc = image.dataset.directSrc?.trim();
@@ -657,6 +661,7 @@ export function HomeScreen({
                     const isReadNowLoading = readNowLoadingKey === resultKey;
                     const watchUrl = getPrimaryWatchOptionUrl(result);
                     const mediaLabel = toDisplayTypeLabel(result);
+                    const canReadNow = !isAnimeResult(result);
                     return (
                     <article className="rag-result-card" key={resultKey}>
                       <div className="rag-result-body">
@@ -700,14 +705,16 @@ export function HomeScreen({
                       </div>
 
                       <div className="search-result-actions rag-action-row">
-                        <button
-                          type="button"
-                          className="search-result-read-btn"
-                          disabled={isReadNowLoading}
-                          onClick={() => handleReadNow(result)}
-                        >
-                          {isReadNowLoading ? "Loading..." : "Read Now"}
-                        </button>
+                        {canReadNow ? (
+                          <button
+                            type="button"
+                            className="search-result-read-btn"
+                            disabled={isReadNowLoading}
+                            onClick={() => handleReadNow(result)}
+                          >
+                            {isReadNowLoading ? "Loading..." : "Read Now"}
+                          </button>
+                        ) : null}
                         {watchUrl ? (
                           <a
                             className="ghost rag-watch-btn"

@@ -1,0 +1,79 @@
+name: Deploy VM
+
+on:
+  workflow_run:
+    workflows:
+      - RAG Golden
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref or SHA to deploy. Defaults to the workflow branch.
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEPLOY_HOST: ${{ secrets.GCP_SSH_HOST }}
+      DEPLOY_USER: ${{ secrets.GCP_SSH_USER }}
+      DEPLOY_PORT: ${{ secrets.GCP_SSH_PORT || '22' }}
+      DEPLOY_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+      DEPLOY_REPO_PATH: ${{ secrets.GCP_REPO_PATH }}
+      DEPLOY_REF: ${{ inputs.ref || github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - name: Validate deploy secrets
+        run: |
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_PORT"
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_REPO_PATH"
+          test -n "$DEPLOY_REF"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy to VM
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_REPO_PATH='$DEPLOY_REPO_PATH' DEPLOY_REF='$DEPLOY_REF' bash -s" <<'EOF'
+          set -euo pipefail
+
+          cd "$DEPLOY_REPO_PATH"
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Deploy aborted: VM repo has uncommitted changes."
+            git status --short
+            exit 1
+          fi
+
+          git fetch --prune origin
+          git checkout --detach "$DEPLOY_REF"
+
+          npm run build --workspace @panelflow/backend
+
+          sudo systemctl restart ragnarok-rag.service
+          sudo systemctl restart ragnarok-backend.service
+
+          echo "Waiting 240s for RAG startup before health checks..."
+          sleep 240
+
+          curl -fsS http://127.0.0.1:8090/health
+          echo
+          curl -fsS http://127.0.0.1:8787/health
+          echo
+          EOF
