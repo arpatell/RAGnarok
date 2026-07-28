@@ -42,10 +42,28 @@ jobs:
 
       - name: Configure SSH
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          if ! [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]; then
+            echo "DEPLOY_PORT must be numeric."
+            exit 1
+          fi
+          if [[ "$DEPLOY_HOST" == *@* || "$DEPLOY_HOST" == http://* || "$DEPLOY_HOST" == https://* ]]; then
+            echo "DEPLOY_HOST must be only the VM hostname or IP address, without user@ or a URL scheme."
+            exit 1
+          fi
+          if ! ssh-keyscan -T 15 -p "$DEPLOY_PORT" "$DEPLOY_HOST" > ~/.ssh/known_hosts 2> /tmp/ssh-keyscan.err; then
+            echo "Unable to read the VM SSH host key with ssh-keyscan."
+            echo "Check GCP_SSH_HOST, GCP_SSH_PORT, the VM external IP/DNS, and firewall access to SSH from GitHub Actions."
+            cat /tmp/ssh-keyscan.err
+            exit 1
+          fi
+          if [ ! -s ~/.ssh/known_hosts ]; then
+            echo "ssh-keyscan returned no host keys. Check that SSH is listening on the configured host and port."
+            exit 1
+          fi
 
       - name: Deploy to VM
         run: |
