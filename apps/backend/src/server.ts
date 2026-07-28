@@ -327,7 +327,7 @@ app.get("/api/read-now", searchLimiter, async (req, res, next) => {
     if (!resolved) {
       throw new IngestError(
         "INGEST_FAILED",
-        `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching for a dedicated website hosting this manga/manhwa.`,
+        `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching online for a dedicated website hosting this manga/manhwa and paste a chapter link into the Paste URL option above.`,
         404
       );
     }

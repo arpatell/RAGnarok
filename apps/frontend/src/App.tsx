@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HomeScreen } from "./components/HomeScreen";
 import { ReaderPage } from "./components/ReaderPage";
+import { JIKAN_OUTAGE_EVENT } from "./lib/api";
 import {
   getFavorites,
   getHistory,
@@ -297,6 +298,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [notFoundUrlDraft, setNotFoundUrlDraft] = useState("");
   const pendingPreviousChapterRef = useRef("");
+  const jikanOutageReportedRef = useRef(false);
 
   useEffect(() => {
     normalizeReaderQueryInRootLocation();
@@ -311,6 +313,32 @@ export default function App() {
 
   useEffect(() => {
     setStorageWarningHandler((message) => setToast(message));
+  }, []);
+
+  useEffect(() => {
+    const handleJikanOutage = (event: Event) => {
+      if (jikanOutageReportedRef.current) {
+        return;
+      }
+
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as { status?: number | null; url?: string } | undefined)
+          : undefined;
+      const status = typeof detail?.status === "number" ? detail.status : null;
+      jikanOutageReportedRef.current = true;
+
+      if (status !== null) {
+        setToast(`Jikan API returned ${status}, so images will not load right now.`);
+      } else {
+        setToast("Jikan API request failed, so images will not load right now.");
+      }
+    };
+
+    window.addEventListener(JIKAN_OUTAGE_EVENT, handleJikanOutage);
+    return () => {
+      window.removeEventListener(JIKAN_OUTAGE_EVENT, handleJikanOutage);
+    };
   }, []);
 
   const navigateTo = useCallback((url: string) => {
@@ -482,6 +510,7 @@ export default function App() {
           onSubmitUrl={navigateTo}
           onRemoveRecent={removeRecent}
           onRemoveFavorite={removeFavorite}
+          onNotify={setToast}
         />
       )}
 
@@ -493,6 +522,7 @@ export default function App() {
           </button>
         </div>
       ) : null}
+
     </>
   );
 }

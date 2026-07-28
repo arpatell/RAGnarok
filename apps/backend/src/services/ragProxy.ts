@@ -5,6 +5,9 @@ const DEFAULT_TOP_K = 10;
 const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.RAG_REQUEST_TIMEOUT_MS ?? "8000", 10);
 const JIKAN_TIMEOUT_MS = Math.max(3_000, Number.parseInt(process.env.JIKAN_TIMEOUT_MS ?? "6500", 10));
 const JIKAN_BASE_URL = "https://api.jikan.moe/v4";
+const MAL_BASE_URL = "https://api.myanimelist.net/v2";
+const MAL_TITLE_ALIAS_TIMEOUT_MS = Math.max(1_000, Number.parseInt(process.env.MAL_TITLE_ALIAS_TIMEOUT_MS ?? "2500", 10));
+const MAL_TITLE_ALIAS_CACHE_TTL_MS = Math.max(60_000, Number.parseInt(process.env.MAL_TITLE_ALIAS_CACHE_TTL_MS ?? "1800000", 10));
 const JIKAN_MIN_INTERVAL_MS = Math.max(450, Number.parseInt(process.env.JIKAN_MIN_INTERVAL_MS ?? "700", 10));
 const JIKAN_MAX_RETRIES = Math.max(1, Number.parseInt(process.env.JIKAN_MAX_RETRIES ?? "3", 10));
 const JIKAN_CACHE_TTL_MS = Math.max(60_000, Number.parseInt(process.env.JIKAN_CACHE_TTL_MS ?? "300000", 10));
@@ -13,11 +16,14 @@ const JIKAN_ENRICH_TOP_N = Math.max(0, Number.parseInt(process.env.RAG_JIKAN_ENR
 const JIKAN_ANIME_COMPANION_TOP_N = Math.max(0, Number.parseInt(process.env.RAG_JIKAN_ANIME_COMPANION_TOP_N ?? "0", 10));
 const RAG_RESPONSE_CACHE_TTL_MS = Math.max(0, Number.parseInt(process.env.RAG_RESPONSE_CACHE_TTL_MS ?? "300000", 10));
 const RAG_RESPONSE_CACHE_MAX = Math.max(0, Number.parseInt(process.env.RAG_RESPONSE_CACHE_MAX ?? "256", 10));
+const RAG_TITLE_ALIAS_QUERY_LIMIT = Math.max(0, Number.parseInt(process.env.RAG_TITLE_ALIAS_QUERY_LIMIT ?? "1", 10));
 
 let nextJikanRequestAt = 0;
 const jikanJsonCache = new Map<string, { expiresAt: number; value: unknown }>();
+const malTitleAliasCache = new Map<string, { expiresAt: number; value: TitleAliasCandidate[] }>();
 const ragResponseCache = new Map<string, { expiresAt: number; value: RagSearchResponse }>();
 const inFlightRagSearches = new Map<string, Promise<RagSearchResponse>>();
+const inFlightMalTitleAliasFetches = new Map<string, Promise<TitleAliasCandidate[]>>();
 
 type ResultSource = "pinecone";
 
@@ -320,6 +326,82 @@ function tokenizeTitleForMatch(value: string): string[] {
     .filter((token) => token.length >= 2);
 }
 
+function editDistance(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = Array.from({ length: right.length + 1 }, () => 0);
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      current[rightIndex] = Math.min(
+        (previous[rightIndex] ?? 0) + 1,
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + substitutionCost
+      );
+    }
+    for (let rightIndex = 0; rightIndex <= right.length; rightIndex += 1) {
+      previous[rightIndex] = current[rightIndex] ?? 0;
+    }
+  }
+
+  return previous[right.length] ?? Math.max(left.length, right.length);
+}
+
+function tokenTypoSimilarity(queryToken: string, candidateToken: string): number {
+  if (queryToken === candidateToken) {
+    return 1;
+  }
+  if (queryToken.length < 4 || candidateToken.length < 4) {
+    return 0;
+  }
+
+  const distance = editDistance(queryToken, candidateToken);
+  const maxLength = Math.max(queryToken.length, candidateToken.length);
+  if (distance > Math.max(1, Math.floor(maxLength * 0.28))) {
+    return 0;
+  }
+
+  return 1 - distance / maxLength;
+}
+
+function fuzzyTitleTokenScore(queryTokens: string[], candidateTokens: string[]): number {
+  if (queryTokens.length === 0 || candidateTokens.length === 0) {
+    return 0;
+  }
+
+  const usedCandidateIndexes = new Set<number>();
+  let total = 0;
+
+  for (const queryToken of queryTokens) {
+    let bestIndex = -1;
+    let bestScore = 0;
+    for (let index = 0; index < candidateTokens.length; index += 1) {
+      if (usedCandidateIndexes.has(index)) {
+        continue;
+      }
+
+      const score = tokenTypoSimilarity(queryToken, candidateTokens[index] ?? "");
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+
+    if (bestIndex >= 0 && bestScore >= 0.7) {
+      usedCandidateIndexes.add(bestIndex);
+      total += bestScore;
+    }
+  }
+
+  const coverage = total / queryTokens.length;
+  return coverage * (queryTokens.length >= 2 ? 0.95 : 0.82);
+}
+
 function titleSimilarityScore(query: string, candidate: string): number {
   const queryNorm = normalizeTitleForMatch(query);
   const candidateNorm = normalizeTitleForMatch(candidate);
@@ -351,7 +433,53 @@ function titleSimilarityScore(query: string, candidate: string): number {
 
   const dice = (2 * intersection) / (querySet.size + candidateSet.size);
   const queryCoverage = intersection / querySet.size;
-  return Math.max(dice, queryCoverage * 0.85);
+  const fuzzyScore = fuzzyTitleTokenScore(queryTokens, candidateTokens);
+  return Math.max(dice, queryCoverage * 0.85, fuzzyScore);
+}
+
+function splitFusedShortSuffixes(query: string): string {
+  const suffixes = ["euro", "reul", "neun", "eul", "eun", "gwa", "ui", "wa", "ro", "ga"];
+  const tokens = cleanText(query).split(/\s+/).filter(Boolean);
+  let changed = false;
+  const nextTokens: string[] = [];
+
+  for (const token of tokens) {
+    const normalizedToken = token.toLowerCase();
+    const suffix = suffixes.find(
+      (candidate) => normalizedToken.endsWith(candidate) && normalizedToken.length >= candidate.length + 5
+    );
+    if (!suffix) {
+      nextTokens.push(token);
+      continue;
+    }
+
+    changed = true;
+    const stem = token.slice(0, -suffix.length);
+    const normalizedStem = stem.toLowerCase();
+    nextTokens.push(normalizedStem.endsWith("e") && suffix === "ui" ? stem.slice(0, -1) : stem);
+    nextTokens.push(suffix);
+  }
+
+  return changed ? cleanText(nextTokens.join(" ")) : "";
+}
+
+function buildMalTitleLookupQueries(query: string): string[] {
+  const seen = new Set<string>();
+  const queries: string[] = [];
+  const splitVariant = splitFusedShortSuffixes(query);
+  const candidates = splitVariant ? [splitVariant, query] : [query];
+
+  for (const value of candidates) {
+    const cleaned = cleanText(value);
+    const key = normalizeTitleForMatch(cleaned);
+    if (!cleaned || !key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    queries.push(cleaned);
+  }
+
+  return queries.slice(0, 2);
 }
 
 function collectJikanTitleCandidates(data: JikanMediaData): string[] {
@@ -395,11 +523,42 @@ function looksLikeTitleSearch(query: string): boolean {
   return !/\b(?:find|finds|found|about|where|who|what|when|why|how|recommend|similar|like|with|without|boy|girl|guy|man|woman|mc|main character|character|kills?|dies?|reincarnat|transported|isekai|revenge|overpowered|betrayed|school|vampire|hunter|demon|plot)\b/i.test(normalized);
 }
 
+function isLatinTitleAlias(value: string): boolean {
+  const cleaned = cleanText(value);
+  if (!cleaned || cleaned.length < 2) {
+    return false;
+  }
+
+  if (/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0600-\u06ff]/.test(cleaned)) {
+    return false;
+  }
+
+  return /[a-zA-Z]/.test(cleaned);
+}
+
 interface TitleAliasCandidate {
   title: string;
   malId: number | null;
   score: number;
   candidates: string[];
+}
+
+interface MalSearchNode {
+  id?: number;
+  title?: string | null;
+  alternative_titles?: {
+    synonyms?: string[] | null;
+    en?: string | null;
+    ja?: string | null;
+  } | null;
+}
+
+interface MalSearchRow {
+  node?: MalSearchNode;
+}
+
+interface MalSearchPayload {
+  data?: MalSearchRow[];
 }
 
 function delay(ms: number): Promise<void> {
@@ -494,58 +653,186 @@ async function fetchJikanJson<T>(url: string, timeoutMs: number): Promise<T> {
   throw lastError ?? new Error("Jikan request failed after retries.");
 }
 
-async function fetchJikanTitleAliasCandidates(query: string): Promise<TitleAliasCandidate[]> {
+function getMalClientId(): string {
+  return cleanText(process.env.MAL_CLIENT_ID ?? process.env.MYANIMELIST_CLIENT_ID);
+}
+
+function collectMalTitleCandidates(node: MalSearchNode): string[] {
+  const values = [
+    node.title,
+    node.alternative_titles?.en,
+    node.alternative_titles?.ja,
+    ...(Array.isArray(node.alternative_titles?.synonyms) ? node.alternative_titles.synonyms : [])
+  ];
+  const seen = new Set<string>();
+  const titles: string[] = [];
+
+  for (const value of values) {
+    const title = cleanText(value);
+    const key = normalizeTitleForMatch(title);
+    if (!title || !key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    titles.push(title);
+  }
+
+  return titles;
+}
+
+async function fetchMalTitleAliasCandidates(query: string): Promise<TitleAliasCandidate[]> {
   if (!looksLikeTitleSearch(query)) {
     return [];
   }
 
-  const mediaTypes: JikanMediaType[] = ["manga", "anime"];
+  const clientId = getMalClientId();
+  if (!clientId) {
+    return [];
+  }
+
+  const cacheKey = normalizeTitleForMatch(query);
+  const cached = malTitleAliasCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const inFlight = inFlightMalTitleAliasFetches.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const fetchPromise = fetchMalTitleAliasCandidatesUncached(query, cacheKey, clientId);
+  inFlightMalTitleAliasFetches.set(cacheKey, fetchPromise);
+
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightMalTitleAliasFetches.delete(cacheKey);
+  }
+}
+
+async function fetchMalTitleAliasCandidatesUncached(
+  query: string,
+  cacheKey: string,
+  clientId: string
+): Promise<TitleAliasCandidate[]> {
+  const mediaTypes = ["manga", "anime"] as const;
+  const lookupQueries = buildMalTitleLookupQueries(query);
   const byTitle = new Map<string, TitleAliasCandidate>();
 
-  for (const mediaType of mediaTypes) {
-    try {
-      const url = new URL(`${JIKAN_BASE_URL}/${mediaType}`);
-      url.searchParams.set("q", query);
-      url.searchParams.set("limit", "5");
-      const payload = await fetchJikanJson<{ data?: JikanMediaData[] }>(url.toString(), JIKAN_TIMEOUT_MS);
-      const rows = Array.isArray(payload.data) ? payload.data : [];
-
-      for (const row of rows) {
-        const titles = collectJikanTitleCandidates(row);
-        const score = Math.max(...titles.map((title) => titleSimilarityScore(query, title)), 0);
-        if (score < 0.72) {
+  for (const lookupQuery of lookupQueries) {
+    for (const mediaType of mediaTypes) {
+      try {
+        const url = new URL(`${MAL_BASE_URL}/${mediaType}`);
+        url.searchParams.set("q", lookupQuery);
+        url.searchParams.set("limit", "5");
+        url.searchParams.set("fields", "id,title,alternative_titles");
+        const response = await fetch(url.toString(), {
+          signal: AbortSignal.timeout(MAL_TITLE_ALIAS_TIMEOUT_MS),
+          headers: {
+            Accept: "application/json",
+            "X-MAL-CLIENT-ID": clientId
+          }
+        });
+        if (!response.ok) {
           continue;
         }
 
-        const preferredTitle =
-          cleanText(row.title_english) ||
-          cleanText(row.title) ||
-          cleanText(row.title_japanese) ||
-          titles[0] ||
-          "";
-        const key = normalizeTitleForMatch(preferredTitle);
-        if (!preferredTitle || !key) {
-          continue;
-        }
+        const payload = (await response.json()) as MalSearchPayload;
+        const rows = Array.isArray(payload.data) ? payload.data : [];
 
-        const existing = byTitle.get(key);
-        if (!existing || score > existing.score) {
-          byTitle.set(key, {
-            title: preferredTitle,
-            malId: safeNumber(row.mal_id),
-            score,
-            candidates: titles
-          });
+        for (const row of rows) {
+          const node = row.node;
+          if (!node) {
+            continue;
+          }
+
+          const titles = collectMalTitleCandidates(node);
+          const score = Math.max(
+            ...titles.map((title) => Math.max(titleSimilarityScore(query, title), titleSimilarityScore(lookupQuery, title))),
+            0
+          );
+          if (score < 0.72) {
+            continue;
+          }
+
+          const preferredTitle = cleanText(node.title) || cleanText(node.alternative_titles?.en) || titles[0] || "";
+          const key = normalizeTitleForMatch(preferredTitle);
+          if (!preferredTitle || !key) {
+            continue;
+          }
+
+          const existing = byTitle.get(key);
+          if (!existing || score > existing.score) {
+            byTitle.set(key, {
+              title: preferredTitle,
+              malId: safeNumber(node.id),
+              score,
+              candidates: titles
+            });
+          }
         }
+      } catch {
+        // Alias expansion is optional; keep plot/character search behavior intact on failures.
       }
-    } catch {
-      // Alias expansion is optional; keep plot/character search behavior intact on failures.
+
+      if (byTitle.size > 0) {
+        break;
+      }
+    }
+
+    if (byTitle.size > 0) {
+      break;
     }
   }
 
-  return Array.from(byTitle.values())
+  if (byTitle.size > 1) {
+    for (const [key, candidate] of byTitle) {
+      const bestTitleScore = Math.max(...candidate.candidates.map((title) => titleSimilarityScore(query, title)), 0);
+      if (bestTitleScore < 0.5) {
+        byTitle.delete(key);
+      }
+    }
+  }
+
+  const aliases = Array.from(byTitle.values())
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
+
+  malTitleAliasCache.set(cacheKey, {
+    expiresAt: Date.now() + MAL_TITLE_ALIAS_CACHE_TTL_MS,
+    value: aliases
+  });
+
+  return aliases;
+}
+
+function buildTitleAliasSearches(query: string, aliases: TitleAliasCandidate[]): Array<{ query: string; alias: TitleAliasCandidate }> {
+  if (RAG_TITLE_ALIAS_QUERY_LIMIT <= 0) {
+    return [];
+  }
+
+  const queryKey = normalizeTitleForMatch(query);
+  const seen = new Set<string>([queryKey]);
+  const searches: Array<{ query: string; alias: TitleAliasCandidate }> = [];
+
+  for (const alias of aliases) {
+    for (const title of [alias.title, ...alias.candidates]) {
+      const cleaned = cleanText(title);
+      const key = normalizeTitleForMatch(cleaned);
+      if (!key || seen.has(key) || !isLatinTitleAlias(cleaned)) {
+        continue;
+      }
+
+      seen.add(key);
+      searches.push({ query: cleaned, alias });
+      if (searches.length >= RAG_TITLE_ALIAS_QUERY_LIMIT) {
+        return searches;
+      }
+    }
+  }
+
+  return searches;
 }
 
 function parseMediaTypeFromSnippet(snippet: string): JikanMediaType | null {
@@ -1086,6 +1373,23 @@ function mergeRagResponses(
   };
 }
 
+function hasStrongPrimaryTitleMatch(query: string, response: RagSearchResponse): boolean {
+  const first = response.results[0];
+  if (!first) {
+    return false;
+  }
+
+  const titleScore = Math.max(
+    titleSimilarityScore(query, first.title),
+    ...(first.title_candidates ?? []).map((title) => titleSimilarityScore(query, title))
+  );
+  if (titleScore >= 0.96) {
+    return true;
+  }
+
+  return titleScore >= 0.9 && (first.score ?? 0) >= 0.8;
+}
+
 export async function searchMangaRag(
   query: string,
   options: { onProgress?: (progress: RagSearchProgress) => void | Promise<void> } = {}
@@ -1101,6 +1405,44 @@ export async function searchMangaRag(
     query: normalized,
     payload: primary
   });
+
+  if (hasStrongPrimaryTitleMatch(normalized, primary)) {
+    await options.onProgress?.({
+      stage: "final",
+      query: normalized,
+      payload: primary
+    });
+
+    return primary;
+  }
+
+  const aliasSearches = buildTitleAliasSearches(normalized, await fetchMalTitleAliasCandidates(normalized));
+  if (aliasSearches.length > 0) {
+    const entries: Array<{ response: RagSearchResponse; alias: TitleAliasCandidate | null }> = [
+      { response: primary, alias: null }
+    ];
+
+    for (const aliasSearch of aliasSearches) {
+      const aliasResponse = await searchMangaRagSingle(aliasSearch.query);
+      entries.push({ response: aliasResponse, alias: aliasSearch.alias });
+
+      await options.onProgress?.({
+        stage: "title_alias",
+        query: normalized,
+        payload: mergeRagResponses(normalized, entries)
+      });
+    }
+
+    const merged = mergeRagResponses(normalized, entries);
+    await options.onProgress?.({
+      stage: "final",
+      query: normalized,
+      payload: merged
+    });
+
+    return merged;
+  }
+
   await options.onProgress?.({
     stage: "final",
     query: normalized,

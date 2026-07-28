@@ -4,7 +4,8 @@ import path from "node:path";
 
 const host = process.env.RAG_HOST?.trim() || "0.0.0.0";
 const port = process.env.RAG_PORT?.trim() || "8090";
-const enableReload = /^(1|true|yes)$/i.test(process.env.RAG_RELOAD?.trim() || "");
+const reloadSetting = process.env.RAG_RELOAD?.trim();
+const enableReload = reloadSetting === undefined || !/^(0|false|no)$/i.test(reloadSetting);
 
 const uvicornModuleArgs = [
   "-m",

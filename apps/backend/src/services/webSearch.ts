@@ -88,19 +88,19 @@ interface SourceReadNowMatch {
 
 const WEEBCENTRAL_BASE_URL = "https://weebcentral.com";
 const WEEBCENTRAL_DOMAIN = "weebcentral.com";
-const WEEBCENTRAL_SEARCH_TIMEOUT_MS = Math.max(1_000, Number.parseInt(process.env.WEEBCENTRAL_SEARCH_TIMEOUT_MS ?? "2500", 10));
-const WEEBCENTRAL_SEARCH_LIMIT = 24;
+const WEEBCENTRAL_SEARCH_TIMEOUT_MS = Math.max(750, Number.parseInt(process.env.WEEBCENTRAL_SEARCH_TIMEOUT_MS ?? "1600", 10));
+const WEEBCENTRAL_SEARCH_LIMIT = Math.max(1, Number.parseInt(process.env.WEEBCENTRAL_SEARCH_LIMIT ?? "8", 10));
 const MANHWAZONE_BASE_URL = "https://manhwazone.com";
 const MANHWAZONE_DOMAIN = "manhwazone.com";
-const MANHWAZONE_SEARCH_TIMEOUT_MS = Math.max(1_000, Number.parseInt(process.env.MANHWAZONE_SEARCH_TIMEOUT_MS ?? "2500", 10));
-const MANHWAZONE_SEARCH_LIMIT = 24;
+const MANHWAZONE_SEARCH_TIMEOUT_MS = Math.max(750, Number.parseInt(process.env.MANHWAZONE_SEARCH_TIMEOUT_MS ?? "1600", 10));
+const MANHWAZONE_SEARCH_LIMIT = Math.max(1, Number.parseInt(process.env.MANHWAZONE_SEARCH_LIMIT ?? "8", 10));
 const MIN_READ_NOW_TITLE_SCORE = 0.58;
-const READ_NOW_TIMEOUT_MS = Math.max(1_500, Number.parseInt(process.env.READ_NOW_TIMEOUT_MS ?? "4000", 10));
+const READ_NOW_TIMEOUT_MS = Math.max(1_500, Number.parseInt(process.env.READ_NOW_TIMEOUT_MS ?? "3200", 10));
 const READ_NOW_SERIES_RESOLVE_TIMEOUT_MS = Math.max(
-  800,
-  Number.parseInt(process.env.READ_NOW_SERIES_RESOLVE_TIMEOUT_MS ?? "1500", 10)
+  600,
+  Number.parseInt(process.env.READ_NOW_SERIES_RESOLVE_TIMEOUT_MS ?? "1000", 10)
 );
-const READ_NOW_TITLE_VARIANT_LIMIT = Math.max(1, Number.parseInt(process.env.READ_NOW_TITLE_VARIANT_LIMIT ?? "4", 10));
+const READ_NOW_TITLE_VARIANT_LIMIT = Math.max(1, Number.parseInt(process.env.READ_NOW_TITLE_VARIANT_LIMIT ?? "2", 10));
 const READ_NOW_CACHE_TTL_MS = Math.max(0, Number.parseInt(process.env.READ_NOW_CACHE_TTL_MS ?? "600000", 10));
 
 interface SourceSeriesCandidate {
@@ -109,11 +109,22 @@ interface SourceSeriesCandidate {
   firstChapterUrl?: string;
 }
 
+type FirstChapterResolution = { chapterUrl: string; matchedTitle: string };
+type FirstChapterCacheValue = FirstChapterResolution | { miss: true };
+
 export interface ReadNowResolveOptions {
   preferManhwa?: boolean;
 }
 
 const readNowCache = new LRUCache<string, ReadNowResolution>({
+  max: 500,
+  ttl: READ_NOW_CACHE_TTL_MS
+});
+const sourceSearchCache = new LRUCache<string, SourceSeriesCandidate[]>({
+  max: 500,
+  ttl: READ_NOW_CACHE_TTL_MS
+});
+const firstChapterCache = new LRUCache<string, FirstChapterCacheValue>({
   max: 500,
   ttl: READ_NOW_CACHE_TTL_MS
 });
@@ -207,7 +218,10 @@ function seriesNameFromSeriesUrl(seriesUrl: string): string {
   try {
     const parsed = new URL(seriesUrl);
     const segments = parsed.pathname.split("/").filter(Boolean);
-    const slug = segments[1] ?? segments[0] ?? "";
+    const slug =
+      isWeebCentralHost(parsed.toString()) && segments[0] === "series"
+        ? segments[2] ?? segments[1] ?? ""
+        : segments[1] ?? segments[0] ?? "";
     if (!slug) {
       return "";
     }
@@ -429,6 +443,12 @@ function extractWeebCentralCandidateTitle(anchor: cheerio.Cheerio<any>, seriesUr
 }
 
 async function fetchWeebCentralSearchSeriesCandidates(title: string): Promise<SourceSeriesCandidate[]> {
+  const cacheKey = `weebcentral:search:${normalizeTitle(title)}`;
+  const cached = sourceSearchCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const searchUrl = buildWeebCentralSearchUrl(title);
 
   try {
@@ -481,6 +501,7 @@ async function fetchWeebCentralSearchSeriesCandidates(title: string): Promise<So
     // eslint-disable-next-line no-console
     console.log(`[read-now] weebcentral candidates=${sorted.length} query="${title.substring(0, 60)}"`);
 
+    sourceSearchCache.set(cacheKey, sorted);
     return sorted;
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -514,6 +535,12 @@ function upsertManhwaZoneCandidate(
 }
 
 async function fetchManhwaZoneSearchSeriesCandidates(title: string): Promise<SourceSeriesCandidate[]> {
+  const cacheKey = `manhwazone:search:${normalizeTitle(title)}`;
+  const cached = sourceSearchCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const searchUrl = `${MANHWAZONE_BASE_URL}/search?keyword=${encodeURIComponent(title)}`;
 
   try {
@@ -594,6 +621,7 @@ async function fetchManhwaZoneSearchSeriesCandidates(title: string): Promise<Sou
     // eslint-disable-next-line no-console
     console.log(`[read-now] manhwazone candidates=${sorted.length} query="${title.substring(0, 60)}"`);
 
+    sourceSearchCache.set(cacheKey, sorted);
     return sorted;
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -724,9 +752,16 @@ function parseManhwaZoneSeriesChapterList($: cheerio.CheerioAPI, baseUrl: string
 async function resolveFirstWeebCentralChapterFromSeriesUrl(
   seriesUrl: string,
   fallbackTitle: string
-): Promise<{ chapterUrl: string; matchedTitle: string } | null> {
+): Promise<FirstChapterResolution | null> {
+  const cacheKey = `weebcentral:first:${seriesUrl}`;
+  const cached = firstChapterCache.get(cacheKey);
+  if (cached !== undefined) {
+    return "miss" in cached ? null : cached;
+  }
+
   const fetched = await fetchChapterHtml(seriesUrl);
   if (fetched.status >= 400 || !fetched.html) {
+    firstChapterCache.set(cacheKey, { miss: true });
     return null;
   }
 
@@ -734,6 +769,7 @@ async function resolveFirstWeebCentralChapterFromSeriesUrl(
   const chapterList = sortChapterList(parseWeebCentralSeriesChapterList($, fetched.finalUrl));
   const firstChapter = chooseChapterOne(chapterList);
   if (!firstChapter?.url) {
+    firstChapterCache.set(cacheKey, { miss: true });
     return null;
   }
 
@@ -743,18 +779,27 @@ async function resolveFirstWeebCentralChapterFromSeriesUrl(
     fallbackTitle ||
     seriesNameFromSeriesUrl(seriesUrl);
   const matchedTitle = cleanTitle(rawTitle) || fallbackTitle || seriesNameFromSeriesUrl(seriesUrl);
-  return {
+  const resolved = {
     chapterUrl: firstChapter.url,
     matchedTitle
   };
+  firstChapterCache.set(cacheKey, resolved);
+  return resolved;
 }
 
 async function resolveFirstManhwaZoneChapterFromSeriesUrl(
   seriesUrl: string,
   fallbackTitle: string
-): Promise<{ chapterUrl: string; matchedTitle: string } | null> {
+): Promise<FirstChapterResolution | null> {
+  const cacheKey = `manhwazone:first:${seriesUrl}`;
+  const cached = firstChapterCache.get(cacheKey);
+  if (cached !== undefined) {
+    return "miss" in cached ? null : cached;
+  }
+
   const fetched = await fetchChapterHtml(seriesUrl);
   if (fetched.status >= 400 || !fetched.html) {
+    firstChapterCache.set(cacheKey, { miss: true });
     return null;
   }
 
@@ -764,6 +809,7 @@ async function resolveFirstManhwaZoneChapterFromSeriesUrl(
   const sortedChapters = sortChapterList(chapterList);
   const firstChapter = chooseChapterOne(sortedChapters);
   if (!firstChapter?.url) {
+    firstChapterCache.set(cacheKey, { miss: true });
     return null;
   }
 
@@ -773,10 +819,12 @@ async function resolveFirstManhwaZoneChapterFromSeriesUrl(
     fallbackTitle;
   const matchedTitle = cleanTitle(rawTitle) || fallbackTitle;
 
-  return {
+  const resolved = {
     chapterUrl: firstChapter.url,
     matchedTitle
   };
+  firstChapterCache.set(cacheKey, resolved);
+  return resolved;
 }
 
 function buildReadNowTitleCandidates(titles: string[] | string): string[] {
@@ -788,6 +836,7 @@ function buildReadNowTitleCandidates(titles: string[] | string): string[] {
     const cleaned = cleanTitle(raw);
     const variants = [
       cleaned,
+      cleaned.replace(/[^a-zA-Z0-9]+/g, " "),
       cleaned.replace(/\s*\([^)]*\)\s*/g, " "),
       cleaned.split(/\s*[-–—:|]\s*/)[0] ?? ""
     ];

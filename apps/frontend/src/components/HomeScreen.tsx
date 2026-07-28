@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { fetchRagResultLiveMeta, relayImageUrl, resolveReadNowByTitle, searchMangaRagStream } from "../lib/api";
+import {
+  fetchRagResultLiveMeta,
+  notifyJikanOutage,
+  relayImageUrl,
+  resolveReadNowByTitle,
+  searchMangaRagStream
+} from "../lib/api";
 import type { FavoriteEntry, HistoryEntry, RagSearchResult } from "../types";
 
 interface HomeScreenProps {
@@ -10,13 +16,15 @@ interface HomeScreenProps {
   onSubmitUrl: (url: string) => void;
   onRemoveRecent: (seriesTitle: string) => void;
   onRemoveFavorite: (seriesTitle: string) => void;
+  onNotify: (message: string) => void;
 }
 
 type InputMode = "smart" | "url";
 type LibraryTab = "recents" | "favorites";
 
 const KOFI_URL = "https://ko-fi.com/phos174";
-const LIVE_META_RETRY_WINDOW_MS = 65_000;
+const LIVE_META_RETRY_WINDOW_MS = 5_000;
+const LIVE_META_MAX_CARDS = 4;
 const LIVE_META_RETRY_PASS_DELAY_MS = 2_500;
 const LIVE_META_BETWEEN_CARD_DELAY_MS = 250;
 
@@ -163,7 +171,8 @@ export function HomeScreen({
   favorites,
   onSubmitUrl,
   onRemoveRecent,
-  onRemoveFavorite
+  onRemoveFavorite,
+  onNotify
 }: HomeScreenProps) {
   const [url, setUrl] = useState(initialUrl);
   const [activeTab, setActiveTab] = useState<LibraryTab>("recents");
@@ -271,6 +280,7 @@ export function HomeScreen({
       void (async () => {
         const pending = new Map(
           topResults
+            .slice(0, LIVE_META_MAX_CARDS)
             .filter((result) => result.mal_id !== null && !result.image_url?.trim())
             .map((result) => [`${result.mal_id}:${result.title}`, result])
         );
@@ -327,7 +337,16 @@ export function HomeScreen({
               if (error instanceof Error && error.name === "AbortError") {
                 return;
               }
-              // Keep this card in the queue; transient Jikan failures and 429s are retried below.
+              const message = error instanceof Error ? error.message : String(error);
+              const statusMatch = message.match(/\((5\d\d)\)/);
+              if (statusMatch?.[1]) {
+                notifyJikanOutage(Number.parseInt(statusMatch[1], 10));
+                return;
+              }
+              if (/failed|network|load|timeout/i.test(message)) {
+                return;
+              }
+              pending.delete(pendingKey);
             }
 
             if (pending.size > 0) {
@@ -364,34 +383,17 @@ export function HomeScreen({
       setReadNowLoadingKey(key);
 
       try {
-        let titleCandidates = [title, ...(result.title_candidates ?? [])];
-        if (result.mal_id !== null) {
-          try {
-            const liveMeta = await fetchRagResultLiveMeta(
-              result.mal_id,
-              result.title,
-              result.media_type,
-              controller.signal
-            );
-            titleCandidates = [title, liveMeta.title, ...liveMeta.title_candidates, ...(result.title_candidates ?? [])];
-          } catch (error) {
-            if (error instanceof Error && error.name === "AbortError") {
-              throw error;
-            }
-            // Read Now can still proceed with the stored RAG title when Jikan aliases are unavailable.
-          }
-        }
-
+        const titleCandidates = [title, ...(result.title_candidates ?? [])];
         const resolved = await resolveReadNowByTitle(
           title,
           titleCandidates,
           controller.signal,
-          result.media_type || result.display_type || ""
+          [result.media_type, result.display_type, ...result.genres].filter(Boolean).join(" ")
         );
         const chapterUrl = resolved.chapterUrl.trim();
         if (!chapterUrl) {
           throw new Error(
-            `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching for a dedicated website hosting this manga/manhwa.`
+            `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching online for a dedicated website hosting this manga/manhwa and paste a chapter link into the Paste URL option above.`
           );
         }
         onSubmitUrl(chapterUrl);
@@ -402,13 +404,14 @@ export function HomeScreen({
         const message =
           error instanceof Error && error.message.trim().length > 0
             ? error.message
-            : `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching for a dedicated website hosting this manga/manhwa.`;
+            : `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching online for a dedicated website hosting this manga/manhwa and paste a chapter link into the Paste URL option above.`;
         setReadNowError(message);
+        onNotify(message);
       } finally {
         setReadNowLoadingKey((current) => (current === key ? null : current));
       }
     },
-    [onSubmitUrl]
+    [onNotify, onSubmitUrl]
   );
 
   function handleSmartSubmit(event: React.FormEvent<HTMLFormElement>) {

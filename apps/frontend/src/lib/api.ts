@@ -75,8 +75,9 @@ interface JikanRecommendationsPayload {
   data?: JikanRecommendationRow[];
 }
 
+const API_BASE_URL = cleanText(import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 const JIKAN_BASE_URL = "https://api.jikan.moe/v4";
-const JIKAN_MAX_RETRIES = 5;
+const JIKAN_MAX_RETRIES = 2;
 const JIKAN_MIN_INTERVAL_MS = 1_100;
 const JIKAN_CACHE_TTL_MS = 15 * 60 * 1000;
 const JIKAN_RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
@@ -84,7 +85,27 @@ const jikanFullCache = new Map<string, { expiresAt: number; value: JikanFullData
 const jikanChapterCountCache = new Map<string, { expiresAt: number; value: number | null }>();
 const jikanRecommendationsCache = new Map<string, { expiresAt: number; value: SuggestionsPayload }>();
 let nextJikanRequestAt = 0;
-const API_BASE_URL = cleanText(import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+
+export const JIKAN_OUTAGE_EVENT = "panelflow:jikan-outage";
+
+export function notifyJikanOutage(status: number | null, url = ""): void {
+  if ((status !== null && (status < 500 || status > 599)) || typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(JIKAN_OUTAGE_EVENT, {
+      detail: {
+        status,
+        url
+      }
+    })
+  );
+}
+
+function notifyJikanOutageResponse(response: Response): void {
+  notifyJikanOutage(response.status, response.url);
+}
 
 function apiPath(pathname: string): string {
   if (!pathname.startsWith("/")) {
@@ -327,8 +348,7 @@ async function fetchJikanFullByType(
         signal,
         cache: "no-store",
         headers: {
-          Accept: "application/json",
-          "Cache-Control": "no-cache"
+          Accept: "application/json"
         }
       });
     } catch (error) {
@@ -336,6 +356,7 @@ async function fetchJikanFullByType(
         throw error;
       }
 
+      notifyJikanOutage(null, url);
       lastError = error instanceof Error ? error : new Error(String(error));
       if (attempt < JIKAN_MAX_RETRIES - 1) {
         await waitFor(computeRetryDelayMs(attempt, null), signal);
@@ -362,6 +383,7 @@ async function fetchJikanFullByType(
       return null;
     }
 
+    notifyJikanOutageResponse(response);
     const body = await response.text().catch(() => "");
     lastError = new Error(`Jikan ${mediaType}/${malId}/full failed (${response.status}): ${body.slice(0, 180)}`);
 
@@ -385,16 +407,25 @@ async function fetchJikanMangaSearch(query: string, signal?: AbortSignal): Promi
   url.searchParams.set("q", query);
   url.searchParams.set("limit", "10");
 
-  const response = await fetch(url.toString(), {
-    signal,
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      "Cache-Control": "no-cache"
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      signal,
+      cache: "no-store",
+      headers: {
+        Accept: "application/json"
+      }
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
     }
-  });
+    notifyJikanOutage(null, url.toString());
+    return [];
+  }
 
   if (!response.ok) {
+    notifyJikanOutageResponse(response);
     if (JIKAN_RETRYABLE_STATUS.has(response.status)) {
       const retryDelayMs = computeRetryDelayMs(0, response.headers.get("retry-after"), response.status);
       nextJikanRequestAt = Math.max(nextJikanRequestAt, Date.now() + retryDelayMs);
@@ -710,16 +741,26 @@ export async function fetchJikanMangaRecommendations(
   }
 
   await waitForJikanSlot(signal);
-  const response = await fetch(`${JIKAN_BASE_URL}/manga/${malId}/recommendations`, {
-    signal,
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      "Cache-Control": "no-cache"
+  const recommendationsUrl = `${JIKAN_BASE_URL}/manga/${malId}/recommendations`;
+  let response: Response;
+  try {
+    response = await fetch(recommendationsUrl, {
+      signal,
+      cache: "no-store",
+      headers: {
+        Accept: "application/json"
+      }
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
     }
-  });
+    notifyJikanOutage(null, recommendationsUrl);
+    throw (error instanceof Error ? error : new Error(String(error)));
+  }
 
   if (!response.ok) {
+    notifyJikanOutageResponse(response);
     if (JIKAN_RETRYABLE_STATUS.has(response.status)) {
       const retryDelayMs = computeRetryDelayMs(0, response.headers.get("retry-after"), response.status);
       nextJikanRequestAt = Math.max(nextJikanRequestAt, Date.now() + retryDelayMs);
