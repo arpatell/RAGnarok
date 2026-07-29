@@ -341,6 +341,18 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!toast?.startsWith("Jikan API")) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setToast((current) => (current === toast ? null : current));
+    }, 5000);
+
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
   const navigateTo = useCallback((url: string) => {
     const trimmed = url.trim();
     if (!trimmed) {

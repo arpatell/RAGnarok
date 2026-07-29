@@ -15,12 +15,20 @@ interface PaginatedReaderProps {
   onTopScrollAttempt?: () => void;
 }
 
-function normalizePanelStyle(settings: ReaderSettings): CSSProperties {
+const PHONE_WIDTH_BREAKPOINT_PX = 720;
+
+function normalizePanelStyle(settings: ReaderSettings, readerWidth: number): CSSProperties {
   const zoomFactor = settings.zoomPercent / 100;
   const zoomPercent = Math.min(200, Math.max(50, settings.zoomPercent));
   const heightOffsetPx = Math.round(120 * zoomFactor);
+  const fitMode =
+    settings.fitMode === "auto"
+      ? readerWidth > 0 && readerWidth <= PHONE_WIDTH_BREAKPOINT_PX
+        ? "width-fit"
+        : "height-fit"
+      : settings.fitMode;
 
-  switch (settings.fitMode) {
+  switch (fitMode) {
     case "height-fit":
       return {
         height: `calc(${zoomPercent}vh - ${heightOffsetPx}px)`,
@@ -47,7 +55,6 @@ function normalizePanelStyle(settings: ReaderSettings): CSSProperties {
         maxHeight: "none",
         flexShrink: 0
       };
-    case "auto":
     case "width-fit":
     default:
       return {
@@ -144,6 +151,8 @@ export function PaginatedReader({
   const tooltipTimerRef = useRef<number | null>(null);
   const selectorIdleTimerRef = useRef<number | null>(null);
   const hasShownEdgeHintRef = useRef(false);
+  const readerRootRef = useRef<HTMLElement | null>(null);
+  const [readerWidth, setReaderWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
 
   const totalPages = panelUrls.length;
   const lastPageIndex = Math.max(totalPages - 1, 0);
@@ -199,7 +208,7 @@ export function PaginatedReader({
     return Array.from(selected).sort((a, b) => a - b);
   }, [safeCurrentPage, totalPages]);
 
-  const panelStyle = useMemo(() => normalizePanelStyle(settings), [settings]);
+  const panelStyle = useMemo(() => normalizePanelStyle(settings, readerWidth), [readerWidth, settings]);
 
   const pageStep = visibleIndices.length > 1 ? 2 : 1;
 
@@ -515,6 +524,31 @@ export function PaginatedReader({
   }, [panelUrls, safeCurrentPage, settings.preloadDepth, visibleIndices]);
 
   useEffect(() => {
+    const root = readerRootRef.current;
+
+    function updateReaderWidth() {
+      const width = root?.getBoundingClientRect().width ?? window.innerWidth;
+      if (width > 0) {
+        setReaderWidth(width);
+      }
+    }
+
+    updateReaderWidth();
+    const resizeObserver = typeof ResizeObserver === "undefined" || !root ? null : new ResizeObserver(updateReaderWidth);
+    if (resizeObserver && root) {
+      resizeObserver.observe(root);
+    }
+    window.addEventListener("resize", updateReaderWidth);
+    window.addEventListener("orientationchange", updateReaderWidth);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateReaderWidth);
+      window.removeEventListener("orientationchange", updateReaderWidth);
+    };
+  }, []);
+
+  useEffect(() => {
     setFailed(new Set());
     setRetryVersion({});
     setRetryAttempts({});
@@ -600,6 +634,7 @@ export function PaginatedReader({
 
   return (
     <section
+      ref={readerRootRef}
       className={`paginated-reader transition-${settings.transitionStyle} ${showSelector ? "selector-visible" : ""} ${
         selectorPinned ? "selector-pinned" : ""
       }`}
