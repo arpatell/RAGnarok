@@ -53,8 +53,10 @@ jobs:
             "DEPLOY_REPO_PATH='$DEPLOY_REPO_PATH' DEPLOY_REF='$DEPLOY_REF' bash -s" <<'EOF'
           set -euo pipefail
 
-          cd "$DEPLOY_REPO_PATH"
+          DEPLOY_REPO_REAL_PATH="$(realpath "$DEPLOY_REPO_PATH")"
           git config --global --add safe.directory "$DEPLOY_REPO_PATH"
+          git config --global --add safe.directory "$DEPLOY_REPO_REAL_PATH"
+          cd "$DEPLOY_REPO_REAL_PATH"
 
           if [ -n "$(git status --porcelain)" ]; then
             echo "Deploy aborted: VM repo has uncommitted changes."
