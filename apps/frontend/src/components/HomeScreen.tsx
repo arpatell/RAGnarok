@@ -311,7 +311,8 @@ export function HomeScreen({
 
               setSmartResults((current) =>
                 current.map((row) => {
-                  if (row.mal_id !== liveMeta.mal_id) {
+                  const rowKey = `${row.mal_id}:${row.title}`;
+                  if (rowKey !== pendingKey || row.mal_id !== liveMeta.mal_id) {
                     return row;
                   }
 

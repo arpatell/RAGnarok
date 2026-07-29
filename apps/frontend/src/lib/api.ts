@@ -200,6 +200,32 @@ function collectJikanTitleCandidates(data: JikanFullData): string[] {
     .filter(Boolean);
 }
 
+function jikanTitleMatchesResult(data: JikanFullData, resultTitle: string): boolean {
+  const normalizedResult = normalizeTitleForMatch(resultTitle);
+  if (!normalizedResult) {
+    return true;
+  }
+
+  const resultTokens = normalizedResult.split(/\s+/).filter((token) => token.length >= 2);
+  for (const title of collectJikanTitleCandidates(data)) {
+    const normalizedTitle = normalizeTitleForMatch(title);
+    if (!normalizedTitle) {
+      continue;
+    }
+    if (normalizedTitle === normalizedResult || normalizedTitle.includes(normalizedResult) || normalizedResult.includes(normalizedTitle)) {
+      return true;
+    }
+
+    const titleTokens = normalizedTitle.split(/\s+/).filter((token) => token.length >= 2);
+    const matched = resultTokens.filter((token) => titleTokens.includes(token)).length;
+    if (resultTokens.length >= 2 && matched / resultTokens.length >= 0.75) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function scoreJikanMangaCandidate(candidate: JikanFullData, query: string): number {
   const normalizedQuery = normalizeTitleForMatch(query);
   if (!normalizedQuery) {
@@ -602,6 +628,9 @@ export async function fetchRagResultLiveMeta(
     try {
       const data = await fetchJikanFullByType(candidateType, malId, signal);
       if (!data) {
+        continue;
+      }
+      if (!jikanTitleMatchesResult(data, title)) {
         continue;
       }
 
