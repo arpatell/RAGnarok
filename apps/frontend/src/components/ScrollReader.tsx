@@ -25,43 +25,65 @@ interface ScrollReaderProps {
 }
 
 const PHONE_WIDTH_BREAKPOINT_PX = 720;
-const LANDSCAPE_PANEL_RATIO_MARGIN = 0.85;
-
-type EffectiveScrollFitMode = "width-fit" | "height-fit" | "original" | "custom";
+const AUTO_COLUMN_FALLBACK_RATIO = 1.75;
+const AUTO_COLUMN_MAX_WIDTH_PX = 760;
+const AUTO_COLUMN_MIN_WIDTH_PX = 320;
 
 interface ReaderViewportSize {
   width: number;
   height: number;
 }
 
-function resolveAutoFitMode(
-  panelAspectRatios: Record<number, number>,
-  viewportSize: ReaderViewportSize
-): "height-fit" | "width-fit" {
-  if (viewportSize.width <= PHONE_WIDTH_BREAKPOINT_PX) {
-    return "width-fit";
-  }
-
+function collectPanelRatios(panelAspectRatios: Record<number, number>): number[] {
   const ratios = Object.values(panelAspectRatios)
     .filter((ratio) => Number.isFinite(ratio) && ratio > 0)
     .sort((a, b) => a - b);
 
-  if (ratios.length === 0) {
-    return "height-fit";
-  }
-
-  const median = ratios[Math.floor(ratios.length / 2)] ?? ratios[0] ?? 1;
-  const viewportRatio = viewportSize.height > 0 && viewportSize.width > 0 ? viewportSize.height / viewportSize.width : 1;
-
-  return median < viewportRatio * LANDSCAPE_PANEL_RATIO_MARGIN ? "width-fit" : "height-fit";
+  return ratios;
 }
 
-function panelStyle(settings: ReaderSettings, fitMode: EffectiveScrollFitMode): CSSProperties {
+function getMedianPanelRatio(panelAspectRatios: Record<number, number>): number | null {
+  const ratios = collectPanelRatios(panelAspectRatios);
+  return ratios[Math.floor(ratios.length / 2)] ?? null;
+}
+
+function panelStyle(
+  settings: ReaderSettings,
+  viewportSize: ReaderViewportSize,
+  panelAspectRatios: Record<number, number>
+): CSSProperties {
   const zoom = Math.min(200, Math.max(50, settings.zoomPercent));
   const zoomFactor = zoom / 100;
   const heightOffsetPx = Math.round(120 * zoomFactor);
 
-  if (fitMode === "height-fit") {
+  if (settings.fitMode === "auto") {
+    if (viewportSize.width <= PHONE_WIDTH_BREAKPOINT_PX) {
+      return {
+        width: "100%",
+        height: "auto",
+        maxWidth: "100%",
+        maxHeight: "none"
+      };
+    }
+
+    const medianRatio = getMedianPanelRatio(panelAspectRatios) ?? AUTO_COLUMN_FALLBACK_RATIO;
+    const availableHeight = Math.max(360, viewportSize.height - heightOffsetPx);
+    const maxColumnWidth = Math.min(AUTO_COLUMN_MAX_WIDTH_PX, Math.max(1, viewportSize.width * 0.94));
+    const minColumnWidth = Math.min(AUTO_COLUMN_MIN_WIDTH_PX, maxColumnWidth);
+    const columnWidth = Math.min(
+      maxColumnWidth,
+      Math.max(minColumnWidth, Math.round((availableHeight / medianRatio) * zoomFactor))
+    );
+
+    return {
+      width: `${columnWidth}px`,
+      height: "auto",
+      maxWidth: "100%",
+      maxHeight: "none"
+    };
+  }
+
+  if (settings.fitMode === "height-fit") {
     return {
       height: `calc(${zoom}dvh - ${heightOffsetPx}px)`,
       width: "auto",
@@ -70,7 +92,7 @@ function panelStyle(settings: ReaderSettings, fitMode: EffectiveScrollFitMode): 
     };
   }
 
-  if (fitMode === "original") {
+  if (settings.fitMode === "original") {
     return {
       width: "auto",
       maxWidth: "none",
@@ -78,7 +100,7 @@ function panelStyle(settings: ReaderSettings, fitMode: EffectiveScrollFitMode): 
     };
   }
 
-  if (fitMode === "custom") {
+  if (settings.fitMode === "custom") {
     return {
       width: `${zoom}%`,
       height: "auto",
@@ -174,12 +196,6 @@ export function ScrollReader({
   const selectorPinned = settings.pinVerticalPageSelector;
   const showSelector = selectorPinned || selectorVisible;
   const isOnLastPanel = currentPanelIndex >= Math.max(panelUrls.length - 1, 0);
-  const effectiveFitMode = useMemo<EffectiveScrollFitMode>(() => {
-    if (settings.fitMode === "auto") {
-      return resolveAutoFitMode(panelAspectRatios, viewportSize);
-    }
-    return settings.fitMode;
-  }, [panelAspectRatios, settings.fitMode, viewportSize]);
 
   function isMobileViewport(): boolean {
     return typeof window !== "undefined" && window.innerWidth <= 1080;
@@ -810,7 +826,7 @@ export function ScrollReader({
           const isActive = activePanels.has(index);
           const isLastPanel = index === panelUrls.length - 1;
           const showEndNextOnPanel = isLastPanel && endNextVisible;
-          const computedPanelStyle = panelStyle(settings, effectiveFitMode);
+          const computedPanelStyle = panelStyle(settings, viewportSize, panelAspectRatios);
 
           return (
             <article className="scroll-panel" key={`${panelUrl}:${index}`} data-index={index}>

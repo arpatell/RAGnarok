@@ -317,6 +317,10 @@ export default function App() {
 
   useEffect(() => {
     const handleJikanOutage = (event: Event) => {
+      if (route.kind === "reader") {
+        return;
+      }
+
       if (jikanOutageReportedRef.current) {
         return;
       }
@@ -339,7 +343,7 @@ export default function App() {
     return () => {
       window.removeEventListener(JIKAN_OUTAGE_EVENT, handleJikanOutage);
     };
-  }, []);
+  }, [route.kind]);
 
   useEffect(() => {
     if (!toast?.startsWith("Jikan API")) {
