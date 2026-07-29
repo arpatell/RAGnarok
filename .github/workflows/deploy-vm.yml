@@ -54,6 +54,7 @@ jobs:
           set -euo pipefail
 
           cd "$DEPLOY_REPO_PATH"
+          git config --global --add safe.directory "$DEPLOY_REPO_PATH"
 
           if [ -n "$(git status --porcelain)" ]; then
             echo "Deploy aborted: VM repo has uncommitted changes."
