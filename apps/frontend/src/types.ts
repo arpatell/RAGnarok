@@ -1,5 +1,5 @@
 export type ReaderMode = "paginated" | "scroll";
-export type FitMode = "width-fit" | "height-fit" | "original" | "custom";
+export type FitMode = "auto" | "width-fit" | "height-fit" | "original" | "custom";
 export type ReadingDirection = "rtl" | "ltr";
 export type SpreadMode = "single" | "double" | "smart";
 export type TransitionStyle = "none" | "fade" | "slide";
@@ -180,7 +180,7 @@ export function createDefaultSettings(): ReaderSettings {
   const preset = CLASSIC_THEME_PRESET;
 
   return {
-    fitMode: "height-fit",
+    fitMode: "auto",
     readingDirection: "ltr",
     spreadMode: "single",
     readerThemePreset: preset.id,

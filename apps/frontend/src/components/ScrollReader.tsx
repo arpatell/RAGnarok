@@ -24,24 +24,42 @@ interface ScrollReaderProps {
   onTopScrollAttempt?: () => void;
 }
 
-const LONG_STRIP_HEIGHT_WIDTH_RATIO = 1.77;
+const PHONE_WIDTH_BREAKPOINT_PX = 720;
+const LANDSCAPE_PANEL_RATIO_MARGIN = 0.85;
 
-function resolveAutoFitMode(settings: ReaderSettings, heightWidthRatio: number | undefined): "height-fit" | "width-fit" {
-  if (heightWidthRatio === undefined) {
-    return settings.fitMode === "height-fit" ? "height-fit" : "width-fit";
-  }
+type EffectiveScrollFitMode = "width-fit" | "height-fit" | "original" | "custom";
 
-  return heightWidthRatio <= LONG_STRIP_HEIGHT_WIDTH_RATIO ? "height-fit" : "width-fit";
+interface ReaderViewportSize {
+  width: number;
+  height: number;
 }
 
-function panelStyle(settings: ReaderSettings, heightWidthRatio?: number): CSSProperties {
+function resolveAutoFitMode(
+  panelAspectRatios: Record<number, number>,
+  viewportSize: ReaderViewportSize
+): "height-fit" | "width-fit" {
+  if (viewportSize.width <= PHONE_WIDTH_BREAKPOINT_PX) {
+    return "width-fit";
+  }
+
+  const ratios = Object.values(panelAspectRatios)
+    .filter((ratio) => Number.isFinite(ratio) && ratio > 0)
+    .sort((a, b) => a - b);
+
+  if (ratios.length === 0) {
+    return "height-fit";
+  }
+
+  const median = ratios[Math.floor(ratios.length / 2)] ?? ratios[0] ?? 1;
+  const viewportRatio = viewportSize.height > 0 && viewportSize.width > 0 ? viewportSize.height / viewportSize.width : 1;
+
+  return median < viewportRatio * LANDSCAPE_PANEL_RATIO_MARGIN ? "width-fit" : "height-fit";
+}
+
+function panelStyle(settings: ReaderSettings, fitMode: EffectiveScrollFitMode): CSSProperties {
   const zoom = Math.min(200, Math.max(50, settings.zoomPercent));
   const zoomFactor = zoom / 100;
   const heightOffsetPx = Math.round(120 * zoomFactor);
-  const fitMode =
-    settings.fitMode === "original" || settings.fitMode === "custom"
-      ? settings.fitMode
-      : resolveAutoFitMode(settings, heightWidthRatio);
 
   if (fitMode === "height-fit") {
     return {
@@ -135,6 +153,10 @@ export function ScrollReader({
   const [activePanels, setActivePanels] = useState<Set<number>>(new Set([0, 1, 2, 3, 4]));
   const [failedPanels, setFailedPanels] = useState<Set<number>>(new Set());
   const [panelAspectRatios, setPanelAspectRatios] = useState<Record<number, number>>({});
+  const [viewportSize, setViewportSize] = useState<ReaderViewportSize>(() => ({
+    width: typeof window === "undefined" ? 0 : window.innerWidth,
+    height: typeof window === "undefined" ? 0 : window.innerHeight
+  }));
   const [retryVersion, setRetryVersion] = useState<Record<number, number>>({});
   const [retryAttempts, setRetryAttempts] = useState<Record<number, number>>({});
   const [selectorVisible, setSelectorVisible] = useState(false);
@@ -152,6 +174,12 @@ export function ScrollReader({
   const selectorPinned = settings.pinVerticalPageSelector;
   const showSelector = selectorPinned || selectorVisible;
   const isOnLastPanel = currentPanelIndex >= Math.max(panelUrls.length - 1, 0);
+  const effectiveFitMode = useMemo<EffectiveScrollFitMode>(() => {
+    if (settings.fitMode === "auto") {
+      return resolveAutoFitMode(panelAspectRatios, viewportSize);
+    }
+    return settings.fitMode;
+  }, [panelAspectRatios, settings.fitMode, viewportSize]);
 
   function isMobileViewport(): boolean {
     return typeof window !== "undefined" && window.innerWidth <= 1080;
@@ -366,6 +394,35 @@ export function ScrollReader({
   useEffect(() => {
     setSelectorVisible(selectorPinned);
   }, [selectorPinned]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+
+    function updateViewportSize() {
+      const bounds = container?.getBoundingClientRect();
+      const width = bounds?.width && bounds.width > 0 ? bounds.width : window.innerWidth;
+      const height = bounds?.height && bounds.height > 0 ? bounds.height : window.innerHeight;
+
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+      setViewportSize({ width, height });
+    }
+
+    updateViewportSize();
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" || !container ? null : new ResizeObserver(updateViewportSize);
+    if (resizeObserver && container) {
+      resizeObserver.observe(container);
+    }
+    window.addEventListener("resize", updateViewportSize);
+    window.addEventListener("orientationchange", updateViewportSize);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateViewportSize);
+      window.removeEventListener("orientationchange", updateViewportSize);
+    };
+  }, []);
 
   useEffect(() => {
     if (!onMobileSelectorVisibilityChange) {
@@ -753,7 +810,7 @@ export function ScrollReader({
           const isActive = activePanels.has(index);
           const isLastPanel = index === panelUrls.length - 1;
           const showEndNextOnPanel = isLastPanel && endNextVisible;
-          const computedPanelStyle = panelStyle(settings, panelAspectRatios[index]);
+          const computedPanelStyle = panelStyle(settings, effectiveFitMode);
 
           return (
             <article className="scroll-panel" key={`${panelUrl}:${index}`} data-index={index}>

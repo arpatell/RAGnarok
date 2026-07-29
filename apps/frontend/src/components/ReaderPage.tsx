@@ -65,6 +65,65 @@ function normalizeUrl(input: string): string {
   }
 }
 
+interface ChapterPreloadEntry {
+  promise: Promise<IngestResponse>;
+  data?: IngestResponse;
+  expiresAt: number;
+}
+
+const chapterPreloadCache = new Map<string, ChapterPreloadEntry>();
+
+function pruneChapterPreloadCache() {
+  const now = Date.now();
+
+  for (const [key, entry] of chapterPreloadCache) {
+    if (entry.expiresAt <= now) {
+      chapterPreloadCache.delete(key);
+    }
+  }
+
+  while (chapterPreloadCache.size > NEXT_CHAPTER_PRELOAD_CACHE_LIMIT) {
+    const oldestKey = chapterPreloadCache.keys().next().value as string | undefined;
+    if (!oldestKey) {
+      return;
+    }
+    chapterPreloadCache.delete(oldestKey);
+  }
+}
+
+function getPreloadedChapter(url: string): ChapterPreloadEntry | null {
+  pruneChapterPreloadCache();
+  return chapterPreloadCache.get(normalizeUrl(url)) ?? null;
+}
+
+function preloadChapterData(url: string): Promise<IngestResponse> {
+  const key = normalizeUrl(url);
+  const existing = getPreloadedChapter(key);
+  if (existing) {
+    return existing.promise;
+  }
+
+  const entry: ChapterPreloadEntry = {
+    expiresAt: Date.now() + NEXT_CHAPTER_PRELOAD_TTL_MS,
+    promise: ingestChapter(url)
+  };
+
+  entry.promise
+    .then((result) => {
+      entry.data = result;
+      entry.expiresAt = Date.now() + NEXT_CHAPTER_PRELOAD_TTL_MS;
+      pruneChapterPreloadCache();
+      return result;
+    })
+    .catch(() => {
+      chapterPreloadCache.delete(key);
+    });
+
+  chapterPreloadCache.set(key, entry);
+  pruneChapterPreloadCache();
+  return entry.promise;
+}
+
 function findPreviousSuccessfulChapterUrl(failedUrl: string): string {
   const normalizedFailed = normalizeUrl(failedUrl);
   const history = getHistory();
@@ -126,6 +185,11 @@ function lighten(hexColor: string, amount: number): string {
 
 type ChapterEntryPoint = "first" | "last";
 const MOBILE_BREAKPOINT = 1080;
+const NEXT_CHAPTER_PRELOAD_TTL_MS = 5 * 60 * 1000;
+const NEXT_CHAPTER_PRELOAD_CACHE_LIMIT = 3;
+const NEXT_CHAPTER_PRELOAD_FRACTION = 0.2;
+const NEXT_CHAPTER_PRELOAD_MIN_REMAINING_PAGES = 3;
+const NEXT_CHAPTER_IMAGE_PRELOAD_LIMIT = 4;
 
 const SERIES_ROOT_SEGMENTS = new Set(["manga", "manhwa", "manhua", "comic", "series", "title", "titles"]);
 const CHAPTER_ROOT_SEGMENTS = new Set(["chapter", "chapters", "viewer", "read", "episode", "episodes"]);
@@ -538,6 +602,7 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
   const previousSettingsOpenRef = useRef(false);
   const topBarPeekHideTimerRef = useRef<number | null>(null);
   const mobileTopChromeHideTimerRef = useRef<number | null>(null);
+  const nextChapterPanelPreloadRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setDraftUrl(chapterUrl);
@@ -642,13 +707,14 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
     let cancelled = false;
 
     async function loadChapter() {
-      setLoading(true);
+      const preloaded = getPreloadedChapter(chapterUrl);
+      setLoading(!preloaded?.data);
       setError(null);
       setSuggestions(null);
       setLoadedChapterUrl(null);
 
       try {
-        const result = await ingestChapter(chapterUrl);
+        const result = preloaded?.data ?? (await (preloaded?.promise ?? ingestChapter(chapterUrl)));
         if (cancelled) {
           return;
         }
@@ -941,6 +1007,58 @@ export function ReaderPage({ chapterUrl, onNavigate, onBackHome, onNavigateNotFo
     data && currentChapterIndex > 0 ? visibleChapterList[currentChapterIndex - 1] ?? null : null;
   const nextChapter =
     data && currentChapterIndex >= 0 ? visibleChapterList[currentChapterIndex + 1] ?? null : null;
+
+  useEffect(() => {
+    if (!data || !nextChapter) {
+      return;
+    }
+
+    const totalPages = Math.max(data.chapter.totalPages, 1);
+    const activePage = mode === "paginated" ? currentPage : scrollPage;
+    const remainingPages = Math.max(totalPages - 1 - activePage, 0);
+    const preloadThreshold = Math.max(
+      NEXT_CHAPTER_PRELOAD_MIN_REMAINING_PAGES,
+      Math.ceil(totalPages * NEXT_CHAPTER_PRELOAD_FRACTION)
+    );
+
+    if (remainingPages > preloadThreshold) {
+      return;
+    }
+
+    let cancelled = false;
+    const nextChapterUrl = nextChapter.url;
+
+    void preloadChapterData(nextChapterUrl)
+      .then((preloaded) => {
+        if (cancelled) {
+          return;
+        }
+
+        const normalizedNextUrl = normalizeUrl(nextChapterUrl);
+        if (nextChapterPanelPreloadRef.current.has(normalizedNextUrl)) {
+          return;
+        }
+
+        nextChapterPanelPreloadRef.current.add(normalizedNextUrl);
+        const firstPanels = preloaded.chapter.panelUrls.slice(
+          0,
+          Math.max(NEXT_CHAPTER_IMAGE_PRELOAD_LIMIT, settings.preloadDepth)
+        );
+
+        for (const panelUrl of firstPanels) {
+          void preloadImageOnce(relayImageUrl(panelUrl), (startedAt) =>
+            logPreloadTiming("next-chapter-preload", panelUrl, startedAt)
+          );
+        }
+      })
+      .catch(() => {
+        // Navigation will retry normally if the speculative preload fails.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPage, data, mode, nextChapter, scrollPage, settings.preloadDepth]);
 
   function navigateTo(
     url: string,

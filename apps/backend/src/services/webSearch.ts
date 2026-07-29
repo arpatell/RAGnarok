@@ -186,6 +186,11 @@ function chooseChapterOne(chapterList: Array<{ number: string; title: string | n
   );
 }
 
+function isExplicitChapterOneUrl(url: string): boolean {
+  const inferred = inferChapterLabel("", url);
+  return isChapterOneLabel(inferred) || parseChapterNumber(inferred) === 1;
+}
+
 const TITLE_STOPWORDS = new Set([
   "a",
   "an",
@@ -992,7 +997,7 @@ async function resolveManhwaZoneReadNowFromTitles(queryTitles: string[]): Promis
   console.log(`[read-now] manhwazone selected title="${selectedMatch.candidate.title}" url=${selectedMatch.candidate.url} score=${selectedMatch.score.toFixed(2)}`);
 
   let resolved: { chapterUrl: string; matchedTitle: string } | null = null;
-  if (selectedMatch.candidate.firstChapterUrl) {
+  if (selectedMatch.candidate.firstChapterUrl && isExplicitChapterOneUrl(selectedMatch.candidate.firstChapterUrl)) {
     // eslint-disable-next-line no-console
     console.log(
       `[read-now] manhwazone using search preview chapter url=${selectedMatch.candidate.firstChapterUrl}`

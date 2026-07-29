@@ -15,6 +15,7 @@ let warningHandler: ((message: string) => void) | null = null;
 
 const STORAGE_KEYS = {
   settings: "panelflow:settings",
+  autoFitDefaultMigrated: "panelflow:auto-fit-default-migrated",
   history: "panelflow:history",
   favorites: "panelflow:favorites",
   bookmarks: "panelflow:bookmarks",
@@ -215,6 +216,14 @@ export function setStorageWarningHandler(handler: (message: string) => void) {
 export function getReaderSettings(): ReaderSettings {
   const defaults = createDefaultSettings();
   const saved = readJson<Partial<ReaderSettings>>(STORAGE_KEYS.settings, {});
+  const shouldMigrateOldHeightFitDefault =
+    saved.fitMode === "height-fit" && readRaw(STORAGE_KEYS.autoFitDefaultMigrated) !== "1";
+  const fitMode = shouldMigrateOldHeightFitDefault ? defaults.fitMode : saved.fitMode ?? defaults.fitMode;
+
+  if (shouldMigrateOldHeightFitDefault) {
+    writeJson(STORAGE_KEYS.settings, { ...saved, fitMode: defaults.fitMode });
+    writeRaw(STORAGE_KEYS.autoFitDefaultMigrated, "1");
+  }
 
   const normalizedPreloadDepth =
     typeof saved.preloadDepth === "number"
@@ -239,7 +248,7 @@ export function getReaderSettings(): ReaderSettings {
   return {
     ...defaults,
     ...saved,
-    fitMode: saved.fitMode ?? defaults.fitMode,
+    fitMode,
     readingDirection: saved.readingDirection ?? defaults.readingDirection,
     spreadMode: saved.spreadMode === "double" ? "double" : "single",
     preloadDepth: normalizedPreloadDepth,

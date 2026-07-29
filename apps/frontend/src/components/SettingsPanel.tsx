@@ -160,6 +160,7 @@ export function SettingsPanel({ isOpen, mode, settings, panelRef, onClose, onCha
           value={settings.fitMode}
           onChange={(event) => update("fitMode", event.target.value as ReaderSettings["fitMode"])}
         >
+          <option value="auto">Auto fit</option>
           <option value="width-fit">Width fit</option>
           <option value="height-fit">Height fit</option>
           <option value="original">Original size</option>

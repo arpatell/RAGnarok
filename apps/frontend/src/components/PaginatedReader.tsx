@@ -47,6 +47,7 @@ function normalizePanelStyle(settings: ReaderSettings): CSSProperties {
         maxHeight: "none",
         flexShrink: 0
       };
+    case "auto":
     case "width-fit":
     default:
       return {
