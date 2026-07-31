@@ -618,10 +618,11 @@ export async function fetchRagResultLiveMeta(
   malId: number,
   title: string,
   mediaType: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  strictMediaType = false
 ): Promise<RagResultLiveMetaPayload> {
   const hint = normalizeMediaTypeHint(mediaType);
-  const candidateTypes = mediaTypeOrder(hint);
+  const candidateTypes = strictMediaType ? [hint] : mediaTypeOrder(hint);
   let lastError: Error | null = null;
 
   for (const candidateType of candidateTypes) {

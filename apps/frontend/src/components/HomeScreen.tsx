@@ -14,7 +14,7 @@ interface HomeScreenProps {
   history: HistoryEntry[];
   favorites: FavoriteEntry[];
   onSubmitUrl: (url: string) => void;
-  onRemoveRecent: (seriesTitle: string) => void;
+  onRemoveRecent: (chapterUrl: string) => void;
   onRemoveFavorite: (seriesTitle: string) => void;
   onNotify: (message: string) => void;
 }
@@ -133,6 +133,14 @@ function isAnimeResult(result: RagSearchResult): boolean {
   return (result.media_type || "").trim().toLowerCase() === "anime";
 }
 
+function parseAppendedMediaTypeFilter(query: string): "anime" | "manga" | null {
+  const match = query.trim().match(/(?:^|\s)(anime|manga|manhwa|manhua)\s*$/i);
+  if (!match || match.index === undefined || query.trim().slice(0, match.index).trim().length === 0) {
+    return null;
+  }
+  return match[1]?.toLowerCase() === "anime" ? "anime" : "manga";
+}
+
 function handleResultImageError(event: React.SyntheticEvent<HTMLImageElement>): void {
   const image = event.currentTarget;
   const directSrc = image.dataset.directSrc?.trim();
@@ -203,14 +211,7 @@ export function HomeScreen({
   const smartAbortRef = useRef<AbortController | null>(null);
   const smartSubmitAtRef = useRef(0);
 
-  const recentSeries = history.reduce<HistoryEntry[]>((acc, entry) => {
-    const key = toSeriesKey(entry.seriesTitle);
-    if (acc.some((item) => toSeriesKey(item.seriesTitle) === key)) {
-      return acc;
-    }
-    acc.push(entry);
-    return acc;
-  }, []);
+  const recentReads = history;
 
   useEffect(() => {
     return () => {
@@ -267,6 +268,7 @@ export function HomeScreen({
         controller.signal
       );
       const topResults = payload.results.slice(0, 10);
+      const mediaTypeFilter = parseAppendedMediaTypeFilter(query);
       setSmartResults(topResults);
       setSmartAnswer(payload.answer);
       setLastSearchQuery(payload.query.trim() || query.trim());
@@ -302,11 +304,17 @@ export function HomeScreen({
                 result.mal_id,
                 result.title,
                 result.media_type,
-                metaController.signal
+                metaController.signal,
+                mediaTypeFilter !== null
               );
 
               if (metaController.signal.aborted) {
                 return;
+              }
+
+              if (mediaTypeFilter !== null && liveMeta.media_type !== mediaTypeFilter) {
+                pending.delete(pendingKey);
+                continue;
               }
 
               setSmartResults((current) =>
@@ -782,7 +790,7 @@ export function HomeScreen({
         <section className="home-card" aria-labelledby="continue-title">
           <div className="home-card-title-row">
             <h2 id="continue-title">Library</h2>
-            <span>{activeTab === "recents" ? recentSeries.length : favorites.length} shown</span>
+            <span>{activeTab === "recents" ? recentReads.length : favorites.length} shown</span>
           </div>
 
           <div className="library-tabs" role="tablist" aria-label="Library views">
@@ -793,7 +801,7 @@ export function HomeScreen({
               className={`library-tab ${activeTab === "recents" ? "active" : ""}`}
               onClick={() => setActiveTab("recents")}
             >
-              Recents ({recentSeries.length})
+              Recents ({recentReads.length})
             </button>
             <button
               type="button"
@@ -806,20 +814,23 @@ export function HomeScreen({
             </button>
           </div>
 
-          {activeTab === "recents" && recentSeries.length === 0 ? (
+          {activeTab === "recents" && recentReads.length === 0 ? (
             <p className="muted">No successful reads yet.</p>
           ) : activeTab === "favorites" && favorites.length === 0 ? (
             <p className="muted">No favorites saved yet.</p>
           ) : (
             <div className="continue-grid">
-              {(activeTab === "recents" ? recentSeries : favorites).map((entry) => {
+              {(activeTab === "recents" ? recentReads : favorites).map((entry) => {
                 const updatedAt =
                   activeTab === "recents"
                     ? new Date((entry as HistoryEntry).visitedAt).toLocaleString()
                     : new Date((entry as FavoriteEntry).updatedAt).toLocaleString();
 
                 return (
-                  <article className="continue-card" key={`${activeTab}-${toSeriesKey(entry.seriesTitle)}`}>
+                  <article
+                    className="continue-card"
+                    key={`${activeTab}-${toSeriesKey(entry.seriesTitle)}-${entry.chapterUrl}`}
+                  >
                     <div className="continue-open" role="group" aria-label={`${entry.seriesTitle} recent entry`}>
                       <span className="continue-title">{entry.seriesTitle}</span>
                       <span className="continue-subtitle">{entry.chapterTitle}</span>
@@ -833,7 +844,7 @@ export function HomeScreen({
                         aria-label={`Remove ${entry.seriesTitle}`}
                         onClick={() =>
                           activeTab === "recents"
-                            ? onRemoveRecent(entry.seriesTitle)
+                            ? onRemoveRecent(entry.chapterUrl)
                             : onRemoveFavorite(entry.seriesTitle)
                         }
                       >

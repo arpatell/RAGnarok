@@ -142,70 +142,6 @@ function normalizeHistoryEntry(entry: HistoryEntry): HistoryEntry {
   };
 }
 
-function normalizeHistorySeriesUrlKey(chapterUrl: string): string | null {
-  try {
-    const parsed = new URL(chapterUrl);
-    const host = parsed.hostname.toLowerCase().replace(/^(www\d*|www|m|mobile|read)\./i, "");
-    const segments = parsed.pathname.split("/").filter(Boolean);
-    if (segments.length === 0) {
-      return host;
-    }
-
-    const chapterIndex = segments.findIndex((segment) =>
-      /^(?:c\d+(?:\.\d+)?|chapter[-_ ]?\d+(?:\.\d+)?|chap[-_ ]?\d+(?:\.\d+)?|ch[-_ ]?\d+(?:\.\d+)?|episode[-_ ]?\d+(?:\.\d+)?|ep[-_ ]?\d+(?:\.\d+)?)$/i.test(segment)
-    );
-
-    const firstChapterKeywordIndex = segments.findIndex((segment) =>
-      /^(?:chapter|chapters|episode|episodes|read|viewer)$/i.test(segment)
-    );
-
-    let seriesSegments = segments;
-    if (chapterIndex > 0) {
-      seriesSegments = segments.slice(0, chapterIndex);
-    } else if (firstChapterKeywordIndex > 0) {
-      seriesSegments = segments.slice(0, firstChapterKeywordIndex);
-    } else {
-      const last = segments[segments.length - 1] ?? "";
-      const strippedLast = last
-        .replace(/(?:[-_])?(?:chapter|chap|ch|episode|ep|c)[-_ ]?\d+(?:\.\d+)?(?:[-_].*)?$/i, "")
-        .replace(/[-_]+$/g, "");
-
-      if (strippedLast && strippedLast !== last) {
-        seriesSegments = [...segments.slice(0, -1), strippedLast];
-      } else if (segments.length > 1 && /\d/.test(last) && /(?:chapter|chapters|episode|episodes|read|viewer)/i.test(parsed.pathname)) {
-        seriesSegments = segments.slice(0, -1);
-      }
-    }
-
-    const normalizedPath = seriesSegments.join("/").toLowerCase();
-    return normalizedPath ? `${host}/${normalizedPath}` : host;
-  } catch {
-    return null;
-  }
-}
-
-function historySeriesKey(entry: HistoryEntry): string {
-  return normalizeHistorySeriesUrlKey(entry.chapterUrl) ?? normalizeSeriesKey(normalizeHistoryEntry(entry).seriesTitle);
-}
-
-function dedupeHistoryBySeries(history: HistoryEntry[]): HistoryEntry[] {
-  const deduped: HistoryEntry[] = [];
-  const seen = new Set<string>();
-
-  for (const rawEntry of history) {
-    const entry = normalizeHistoryEntry(rawEntry);
-    const key = historySeriesKey(entry);
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    deduped.push(entry);
-  }
-
-  return deduped;
-}
-
 export function setStorageWarningHandler(handler: (message: string) => void) {
   warningHandler = handler;
   if (!storageEnabled) {
@@ -297,16 +233,21 @@ export function saveMode(adapterId: string, mode: ReaderMode): boolean {
 }
 
 export function getHistory(): HistoryEntry[] {
-  return dedupeHistoryBySeries(readJson<HistoryEntry[]>(STORAGE_KEYS.history, []));
+  return readJson<HistoryEntry[]>(STORAGE_KEYS.history, []).map(normalizeHistoryEntry);
 }
 
 export function pushHistory(entry: HistoryEntry): boolean {
   const normalizedEntry = normalizeHistoryEntry(entry);
-  const targetSeriesKey = historySeriesKey(normalizedEntry);
   const history = readJson<HistoryEntry[]>(STORAGE_KEYS.history, []);
-  const deduped = dedupeHistoryBySeries(history).filter((item) => historySeriesKey(item) !== targetSeriesKey);
+  const deduped = history.map(normalizeHistoryEntry).filter((item) => normalizeUrl(item.chapterUrl) !== normalizeUrl(normalizedEntry.chapterUrl));
   deduped.unshift(normalizedEntry);
   return writeJson(STORAGE_KEYS.history, deduped.slice(0, 50));
+}
+
+export function removeHistoryEntry(chapterUrl: string): boolean {
+  const target = normalizeUrl(chapterUrl);
+  const filtered = getHistory().filter((entry) => normalizeUrl(entry.chapterUrl) !== target);
+  return writeJson(STORAGE_KEYS.history, filtered);
 }
 
 export function removeHistorySeries(seriesTitle: string): boolean {

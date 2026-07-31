@@ -6,8 +6,8 @@ import {
   getFavorites,
   getHistory,
   getReaderSettings,
+  removeHistoryEntry,
   removeFavoriteBySeries,
-  removeHistorySeries,
   setStorageWarningHandler
 } from "./lib/storage";
 import type { FavoriteEntry, HistoryEntry } from "./types";
@@ -439,8 +439,8 @@ export default function App() {
     setFavoriteEntries(getFavorites());
   }, []);
 
-  const removeRecent = useCallback((seriesTitle: string) => {
-    removeHistorySeries(seriesTitle);
+  const removeRecent = useCallback((chapterUrl: string) => {
+    removeHistoryEntry(chapterUrl);
     setHistoryEntries(getHistory());
   }, []);
 

@@ -164,6 +164,11 @@ export interface RagSearchProgress {
   payload: RagSearchResponse;
 }
 
+interface RagSearchOptions {
+  onProgress?: (progress: RagSearchProgress) => void | Promise<void>;
+  mediaTypeFilter?: JikanMediaType | null;
+}
+
 export interface RagResultLiveMetadata {
   mal_id: number;
   media_type: string;
@@ -885,6 +890,52 @@ function parseMediaHint(value: string | null | undefined): JikanMediaType | null
   return null;
 }
 
+function parseAppendedMediaTypeFilter(query: string): { query: string; mediaTypeFilter: JikanMediaType | null } {
+  const normalized = cleanText(query);
+  const match = normalized.match(/(?:^|\s)(anime|manga|manhwa|manhua)\s*$/i);
+  if (!match || match.index === undefined) {
+    return { query: normalized, mediaTypeFilter: null };
+  }
+
+  const stripped = normalized.slice(0, match.index).trim();
+  if (!stripped) {
+    return { query: normalized, mediaTypeFilter: null };
+  }
+
+  const mediaWord = match[1]?.toLowerCase();
+  return {
+    query: stripped,
+    mediaTypeFilter: mediaWord === "anime" ? "anime" : "manga"
+  };
+}
+
+function filterRagResponseByMediaType(
+  response: RagSearchResponse,
+  mediaTypeFilter: JikanMediaType | null,
+  displayQuery: string
+): RagSearchResponse {
+  if (!mediaTypeFilter) {
+    return response;
+  }
+
+  const results = response.results.filter((result) => cleanText(result.media_type).toLowerCase() === mediaTypeFilter);
+  const first = results[0] ?? null;
+
+  return {
+    ...response,
+    query: displayQuery,
+    answer:
+      results.length > 0
+        ? `Found ${results.length} ${mediaTypeFilter} matches.`
+        : `No ${mediaTypeFilter} Smart Search matches found.`,
+    retrieval_mode: response.retrieval_mode.includes("type_filter")
+      ? response.retrieval_mode
+      : `${response.retrieval_mode}_type_filter`,
+    results,
+    highlight: first ? buildFallbackHighlight(first, displayQuery) : null
+  };
+}
+
 function extractSnippetSection(snippet: string, marker: string, stopMarkers: string[]): string {
   const normalized = cleanText(snippet);
   if (!normalized) {
@@ -1182,7 +1233,7 @@ function buildFallbackHighlight(result: RagSearchResult, query: string): RagSear
   };
 }
 
-async function searchMangaRagSingle(query: string): Promise<RagSearchResponse> {
+async function searchMangaRagSingle(query: string, mediaTypeFilter: JikanMediaType | null = null): Promise<RagSearchResponse> {
   const normalized = cleanText(query);
   if (!normalized) {
     return {
@@ -1194,7 +1245,7 @@ async function searchMangaRagSingle(query: string): Promise<RagSearchResponse> {
     };
   }
 
-  const cacheKey = normalizeTitleForMatch(normalized);
+  const cacheKey = `${mediaTypeFilter ?? "any"}:${normalizeTitleForMatch(normalized)}`;
   const cached = getCachedRagResponse(cacheKey);
   if (cached) {
     return cached;
@@ -1205,7 +1256,7 @@ async function searchMangaRagSingle(query: string): Promise<RagSearchResponse> {
     return cloneRagResponse(await inFlight);
   }
 
-  const searchPromise = searchMangaRagSingleUncached(normalized);
+  const searchPromise = searchMangaRagSingleUncached(normalized, mediaTypeFilter);
   inFlightRagSearches.set(cacheKey, searchPromise);
 
   try {
@@ -1217,7 +1268,10 @@ async function searchMangaRagSingle(query: string): Promise<RagSearchResponse> {
   }
 }
 
-async function searchMangaRagSingleUncached(normalized: string): Promise<RagSearchResponse> {
+async function searchMangaRagSingleUncached(
+  normalized: string,
+  mediaTypeFilter: JikanMediaType | null = null
+): Promise<RagSearchResponse> {
 
   const remote = await callHybridRagService(normalized);
   const remoteAnswer = cleanText(remote.answer);
@@ -1231,7 +1285,7 @@ async function searchMangaRagSingleUncached(normalized: string): Promise<RagSear
     const preferredMediaType = parseMediaTypeFromSnippet(snippet);
     const title = fallbackTitle;
     const citation = buildCitation(malId, title);
-    const mediaType = preferredMediaType ?? "manga";
+    const mediaType = preferredMediaType ?? "unknown";
     const displayType = parseDisplayTypeFromSnippet(snippet) || mediaType;
     const synopsis = extractSynopsisFromSnippet(snippet) || snippet || "No synopsis available.";
     const characters = extractCharactersFromSnippet(snippet);
@@ -1262,12 +1316,17 @@ async function searchMangaRagSingleUncached(normalized: string): Promise<RagSear
     } satisfies RagSearchResult);
   }
 
-  const first = enrichedResults[0] ?? null;
+  const filteredResults = mediaTypeFilter
+    ? enrichedResults.filter((result) => cleanText(result.media_type).toLowerCase() === mediaTypeFilter)
+    : enrichedResults;
+  const first = filteredResults[0] ?? null;
   const highlightImageUrl = cleanText(remote.highlight?.image_url) || null;
   if (first && !first.image_url && highlightImageUrl) {
     first.image_url = highlightImageUrl;
   }
-  const highlight = first
+  const highlight = mediaTypeFilter && first
+    ? buildFallbackHighlight(first, normalized)
+    : first
     ? (() => {
         const citation =
           cleanText(remote.highlight?.citation) || first.citations[0] || buildCitation(first.mal_id, first.title);
@@ -1289,12 +1348,18 @@ async function searchMangaRagSingleUncached(normalized: string): Promise<RagSear
   return {
     query: normalized,
     answer:
-      remoteAnswer ||
-      (enrichedResults.length > 0
-        ? `Found ${enrichedResults.length} strong matches.`
-        : "No Smart Search matches found."),
-    retrieval_mode: cleanText(remote.retrieval_mode) || "hybrid_cache",
-    results: enrichedResults,
+      mediaTypeFilter
+        ? filteredResults.length > 0
+          ? `Found ${filteredResults.length} ${mediaTypeFilter} matches.`
+          : `No ${mediaTypeFilter} Smart Search matches found.`
+        : remoteAnswer ||
+          (filteredResults.length > 0
+            ? `Found ${filteredResults.length} strong matches.`
+            : "No Smart Search matches found."),
+    retrieval_mode: mediaTypeFilter
+      ? `${cleanText(remote.retrieval_mode) || "hybrid_cache"}_type_filter`
+      : cleanText(remote.retrieval_mode) || "hybrid_cache",
+    results: filteredResults,
     highlight
   };
 }
@@ -1392,14 +1457,21 @@ function hasStrongPrimaryTitleMatch(query: string, response: RagSearchResponse):
 
 export async function searchMangaRag(
   query: string,
-  options: { onProgress?: (progress: RagSearchProgress) => void | Promise<void> } = {}
+  options: RagSearchOptions = {}
 ): Promise<RagSearchResponse> {
   const normalized = cleanText(query);
   if (!normalized) {
-    return searchMangaRagSingle(query);
+    return searchMangaRagSingle(query, options.mediaTypeFilter ?? null);
   }
 
-  const primary = await searchMangaRagSingle(normalized);
+  const parsedFilter = parseAppendedMediaTypeFilter(normalized);
+  const mediaTypeFilter = options.mediaTypeFilter ?? parsedFilter.mediaTypeFilter;
+  const searchQuery = parsedFilter.mediaTypeFilter ? parsedFilter.query : normalized;
+  const primary = filterRagResponseByMediaType(
+    await searchMangaRagSingle(searchQuery, mediaTypeFilter),
+    mediaTypeFilter,
+    normalized
+  );
   await options.onProgress?.({
     stage: "primary",
     query: normalized,
@@ -1416,14 +1488,18 @@ export async function searchMangaRag(
     return primary;
   }
 
-  const aliasSearches = buildTitleAliasSearches(normalized, await fetchMalTitleAliasCandidates(normalized));
+  const aliasSearches = buildTitleAliasSearches(searchQuery, await fetchMalTitleAliasCandidates(searchQuery));
   if (aliasSearches.length > 0) {
     const entries: Array<{ response: RagSearchResponse; alias: TitleAliasCandidate | null }> = [
       { response: primary, alias: null }
     ];
 
     for (const aliasSearch of aliasSearches) {
-      const aliasResponse = await searchMangaRagSingle(aliasSearch.query);
+      const aliasResponse = filterRagResponseByMediaType(
+        await searchMangaRagSingle(aliasSearch.query, mediaTypeFilter),
+        mediaTypeFilter,
+        normalized
+      );
       entries.push({ response: aliasResponse, alias: aliasSearch.alias });
 
       await options.onProgress?.({
