@@ -1,0 +1,16 @@
+FROM node:20-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json apps/backend/
+RUN npm ci --workspace @panelflow/backend --include-workspace-root=false || npm ci
+COPY tsconfig.base.json tsconfig.json ./
+COPY apps/backend ./apps/backend
+RUN npm run build --workspace @panelflow/backend
+
+FROM node:20-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/backend/dist ./apps/backend/dist
+EXPOSE 8787
+CMD ["node", "apps/backend/dist/server.js"]

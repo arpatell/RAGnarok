@@ -3,7 +3,12 @@ import { LRUCache } from "lru-cache";
 import { z } from "zod";
 import { resolveAdapterForUrl } from "../adapters/index.js";
 import { IngestError } from "../errors.js";
-import type { Adapter, ChapterListItem, ExtractedChapterData, IngestResponse } from "../types.js";
+import type {
+  Adapter,
+  ChapterListItem,
+  ExtractedChapterData,
+  IngestResponse,
+} from "../types.js";
 import { extractChapterData } from "./aiExtractor.js";
 import { sortChapterList } from "./chapterSort.js";
 import { fetchChapterHtml } from "./fetchProxy.js";
@@ -15,7 +20,9 @@ const urlSchema = z.string().url();
 
 const parseCache = new LRUCache<string, IngestResponse>({
   max: 500,
-  ttl: 15 * 60 * 1000
+  // Chapter pages are stable; 60 min keeps repeat opens off the upstream site
+  // entirely while staying small enough for the e2-micro memory budget.
+  ttl: 60 * 60 * 1000,
 });
 
 const CHAPTER_LINK_SELECTORS = [
@@ -27,14 +34,35 @@ const CHAPTER_LINK_SELECTORS = [
   ".episode_lst a",
   "a[href*='/chapter']",
   "a[href*='/c']",
-  "a[href*='/episode']"
+  "a[href*='/episode']",
 ];
 
 const MIN_FULL_CHAPTER_LIST_SIZE = 8;
 const MAX_INDEX_FETCH_ATTEMPTS = 3;
-const SERIES_ROOT_SEGMENTS = new Set(["manga", "manhwa", "manhua", "comic", "series", "title", "titles"]);
-const CHAPTER_ROOT_SEGMENTS = new Set(["chapter", "chapters", "viewer", "read", "episode", "episodes"]);
-const SERIES_QUERY_KEYS = ["title_no", "series", "manga", "comic", "id"] as const;
+const SERIES_ROOT_SEGMENTS = new Set([
+  "manga",
+  "manhwa",
+  "manhua",
+  "comic",
+  "series",
+  "title",
+  "titles",
+]);
+const CHAPTER_ROOT_SEGMENTS = new Set([
+  "chapter",
+  "chapters",
+  "viewer",
+  "read",
+  "episode",
+  "episodes",
+]);
+const SERIES_QUERY_KEYS = [
+  "title_no",
+  "series",
+  "manga",
+  "comic",
+  "id",
+] as const;
 const CHAPTER_IN_SEGMENT_PATTERN =
   /(?:-|_| )?(?:chapter|chap|ch|episode|ep|c)[-_ ]*\d+(?:\.\d+)?(?:[-_ ]?(?:v|p)\d+)?$/i;
 const WEEBCENTRAL_IMAGE_RE =
@@ -44,11 +72,15 @@ const BROWSER_UA =
   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 function looksLikeChapterUrl(url: string): boolean {
-  return /(?:\/|-)chapter[-_/ ]?\d+|\bc\d+(?:\.\d+)?\b|(?:\/|-)ep(?:isode)?[-_/ ]?\d+/i.test(url);
+  return /(?:\/|-)chapter[-_/ ]?\d+|\bc\d+(?:\.\d+)?\b|(?:\/|-)ep(?:isode)?[-_/ ]?\d+/i.test(
+    url,
+  );
 }
 
 function looksLikeChapterText(value: string | null | undefined): boolean {
-  return /\b(chapter|ch\.?|episode|ep\.?|prologue|oneshot|one-shot)\b/i.test(value ?? "");
+  return /\b(chapter|ch\.?|episode|ep\.?|prologue|oneshot|one-shot)\b/i.test(
+    value ?? "",
+  );
 }
 
 function parseChapterNumber(value: string | null | undefined): number | null {
@@ -114,7 +146,10 @@ function normalizeSeriesSegment(segment: string): string {
     return "";
   }
 
-  const stripped = cleaned.replace(CHAPTER_IN_SEGMENT_PATTERN, "").replace(/[-_]+$/g, "").trim();
+  const stripped = cleaned
+    .replace(CHAPTER_IN_SEGMENT_PATTERN, "")
+    .replace(/[-_]+$/g, "")
+    .trim();
   return stripped || cleaned;
 }
 
@@ -179,7 +214,10 @@ function isSameSeriesUrl(baseUrl: string, candidateUrl: string): boolean {
   return baseKey === candidateKey;
 }
 
-function isSourceSiblingChapterUrl(baseUrl: string, candidateUrl: string): boolean {
+function isSourceSiblingChapterUrl(
+  baseUrl: string,
+  candidateUrl: string,
+): boolean {
   try {
     const base = new URL(baseUrl);
     const candidate = new URL(candidateUrl);
@@ -190,11 +228,17 @@ function isSourceSiblingChapterUrl(baseUrl: string, candidateUrl: string): boole
     }
 
     if (baseHost.endsWith("weebcentral.com")) {
-      return base.pathname.startsWith("/chapters/") && candidate.pathname.startsWith("/chapters/");
+      return (
+        base.pathname.startsWith("/chapters/") &&
+        candidate.pathname.startsWith("/chapters/")
+      );
     }
 
     if (baseHost.endsWith("manhwazone.com")) {
-      return base.pathname.startsWith("/preview/") && candidate.pathname.startsWith("/preview/");
+      return (
+        base.pathname.startsWith("/preview/") &&
+        candidate.pathname.startsWith("/preview/")
+      );
     }
 
     return false;
@@ -203,8 +247,13 @@ function isSourceSiblingChapterUrl(baseUrl: string, candidateUrl: string): boole
   }
 }
 
-function filterChapterListToSeries(baseUrl: string, chapters: ChapterListItem[]): ChapterListItem[] {
-  const filtered = chapters.filter((chapter) => isSameSeriesUrl(baseUrl, chapter.url));
+function filterChapterListToSeries(
+  baseUrl: string,
+  chapters: ChapterListItem[],
+): ChapterListItem[] {
+  const filtered = chapters.filter((chapter) =>
+    isSameSeriesUrl(baseUrl, chapter.url),
+  );
   if (filtered.length === 0) {
     return chapters;
   }
@@ -221,7 +270,7 @@ function mergeUniqueChapters(chapters: ChapterListItem[]): ChapterListItem[] {
     if (!existing) {
       unique.set(normalizedUrl, {
         ...chapter,
-        url: normalizedUrl
+        url: normalizedUrl,
       });
       continue;
     }
@@ -231,7 +280,7 @@ function mergeUniqueChapters(chapters: ChapterListItem[]): ChapterListItem[] {
       number: existing.number || chapter.number,
       title: existing.title || chapter.title,
       special: existing.special ?? chapter.special,
-      url: normalizedUrl
+      url: normalizedUrl,
     });
   }
 
@@ -276,7 +325,9 @@ function inferSeriesCandidateUrls(chapterUrl: string): string[] {
     }
 
     return Array.from(candidates).filter(
-      (candidate) => normalizeComparableUrl(candidate) !== normalizeComparableUrl(chapterUrl)
+      (candidate) =>
+        normalizeComparableUrl(candidate) !==
+        normalizeComparableUrl(chapterUrl),
     );
   } catch {
     return [];
@@ -287,11 +338,14 @@ async function enrichSparseChapterList(
   chapterUrl: string,
   _seriesTitle: string,
   _chapterUrlPattern: string | null,
-  chapterList: ChapterListItem[]
+  chapterList: ChapterListItem[],
 ): Promise<ChapterListItem[]> {
   let merged = mergeUniqueChapters(chapterList);
 
-  const candidates = inferSeriesCandidateUrls(chapterUrl).slice(0, MAX_INDEX_FETCH_ATTEMPTS);
+  const candidates = inferSeriesCandidateUrls(chapterUrl).slice(
+    0,
+    MAX_INDEX_FETCH_ATTEMPTS,
+  );
 
   for (const candidateUrl of candidates) {
     try {
@@ -301,7 +355,11 @@ async function enrichSparseChapterList(
       }
 
       const $ = cheerio.load(fetched.html);
-      const discovered = extractChapterLinks($, CHAPTER_LINK_SELECTORS, fetched.finalUrl);
+      const discovered = extractChapterLinks(
+        $,
+        CHAPTER_LINK_SELECTORS,
+        fetched.finalUrl,
+      );
       if (discovered.length === 0) {
         continue;
       }
@@ -346,7 +404,9 @@ function isSourceSeriesPageUrl(url: string): boolean {
     const first = segments[0] ?? "";
 
     if (host.endsWith("weebcentral.com")) {
-      return first === "series" && Boolean(segments[1]) && segments[1] !== "random";
+      return (
+        first === "series" && Boolean(segments[1]) && segments[1] !== "random"
+      );
     }
 
     if (host.endsWith("manhwazone.com")) {
@@ -359,7 +419,10 @@ function isSourceSeriesPageUrl(url: string): boolean {
   }
 }
 
-function findSourceSeriesUrlFromHtml(html: string, chapterUrl: string): string | null {
+function findSourceSeriesUrlFromHtml(
+  html: string,
+  chapterUrl: string,
+): string | null {
   if (!isWeebCentralUrl(chapterUrl) && !isManhwaZoneUrl(chapterUrl)) {
     return null;
   }
@@ -373,7 +436,10 @@ function findSourceSeriesUrlFromHtml(html: string, chapterUrl: string): string |
 
   $("a[href]").each((_, node) => {
     const href = toAbsoluteUrl(chapterUrl, $(node).attr("href"));
-    if (!href || normalizeComparableUrl(href) === normalizeComparableUrl(chapterUrl)) {
+    if (
+      !href ||
+      normalizeComparableUrl(href) === normalizeComparableUrl(chapterUrl)
+    ) {
       return;
     }
 
@@ -385,7 +451,10 @@ function findSourceSeriesUrlFromHtml(html: string, chapterUrl: string): string |
   return candidates.values().next().value ?? null;
 }
 
-function getWeebCentralFullChapterListUrl($: cheerio.CheerioAPI, seriesUrl: string): string | null {
+function getWeebCentralFullChapterListUrl(
+  $: cheerio.CheerioAPI,
+  seriesUrl: string,
+): string | null {
   const explicit = $("[hx-get*='full-chapter-list']").first().attr("hx-get");
   const resolvedExplicit = toAbsoluteUrl(seriesUrl, explicit);
   if (resolvedExplicit) {
@@ -435,7 +504,10 @@ function findManhwaZoneChapterSnapshot($: cheerio.CheerioAPI): string | null {
   return snapshot;
 }
 
-function collectManhwaZoneChapterObjects(value: unknown, output: Array<Record<string, unknown>>): void {
+function collectManhwaZoneChapterObjects(
+  value: unknown,
+  output: Array<Record<string, unknown>>,
+): void {
   if (Array.isArray(value)) {
     for (const item of value) {
       collectManhwaZoneChapterObjects(item, output);
@@ -458,11 +530,19 @@ function collectManhwaZoneChapterObjects(value: unknown, output: Array<Record<st
   }
 }
 
-function parseManhwaZoneChaptersFromSnapshot(snapshot: string, baseUrl: string): {
+function parseManhwaZoneChaptersFromSnapshot(
+  snapshot: string,
+  baseUrl: string,
+): {
   chapters: ChapterListItem[];
   hasMore: boolean;
 } {
-  const parsed = JSON.parse(snapshot) as { data?: Record<string, unknown> };
+  let parsed: { data?: Record<string, unknown> };
+  try {
+    parsed = JSON.parse(snapshot) as { data?: Record<string, unknown> };
+  } catch {
+    return { chapters: [], hasMore: false };
+  }
   const data = parsed.data ?? {};
   const chapterObjects: Array<Record<string, unknown>> = [];
   collectManhwaZoneChapterObjects(data.chapters, chapterObjects);
@@ -474,19 +554,27 @@ function parseManhwaZoneChaptersFromSnapshot(snapshot: string, baseUrl: string):
         return null;
       }
 
-      const name = String(chapter.name ?? "").replace(/\s+/g, " ").trim();
-      const chapterNo = String(chapter.chapter_no ?? "").replace(/\s+/g, " ").trim();
+      const name = String(chapter.name ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const chapterNo = String(chapter.chapter_no ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
       return {
-        number: chapterNo || name || url.split("/").filter(Boolean).at(-1)?.slice(0, 64) || "Unknown",
+        number:
+          chapterNo ||
+          name ||
+          url.split("/").filter(Boolean).at(-1)?.slice(0, 64) ||
+          "Unknown",
         title: name || null,
-        url
+        url,
       };
     })
     .filter((chapter): chapter is ChapterListItem => Boolean(chapter));
 
   return {
     chapters,
-    hasMore: data.hasMore === true
+    hasMore: data.hasMore === true,
   };
 }
 
@@ -496,7 +584,7 @@ async function postManhwaZoneLivewire(
   token: string,
   cookieHeader: string,
   snapshot: string,
-  method: "bootLoad" | "loadMore"
+  method: "bootLoad" | "loadMore",
 ): Promise<string | null> {
   const response = await fetch(endpoint, {
     method: "POST",
@@ -507,7 +595,7 @@ async function postManhwaZoneLivewire(
       "X-CSRF-TOKEN": token,
       "X-Livewire": "true",
       Referer: referer,
-      ...(cookieHeader ? { Cookie: cookieHeader } : {})
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     },
     body: JSON.stringify({
       _token: token,
@@ -515,10 +603,10 @@ async function postManhwaZoneLivewire(
         {
           snapshot,
           updates: {},
-          calls: [{ path: "", method, params: [] }]
-        }
-      ]
-    })
+          calls: [{ path: "", method, params: [] }],
+        },
+      ],
+    }),
   });
 
   if (!response.ok) {
@@ -532,14 +620,16 @@ async function postManhwaZoneLivewire(
   return payload.components?.[0]?.snapshot ?? null;
 }
 
-async function fetchManhwaZoneLivewireChapterList(seriesUrl: string): Promise<ChapterListItem[]> {
+async function fetchManhwaZoneLivewireChapterList(
+  seriesUrl: string,
+): Promise<ChapterListItem[]> {
   try {
     const seriesResponse = await fetch(seriesUrl, {
       headers: {
         "User-Agent": BROWSER_UA,
         Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9"
-      }
+        "Accept-Language": "en-US,en;q=0.9",
+      },
     });
     if (!seriesResponse.ok) {
       return [];
@@ -554,10 +644,15 @@ async function fetchManhwaZoneLivewireChapterList(seriesUrl: string): Promise<Ch
     }
 
     const endpoint = new URL("/livewire/update", seriesUrl).toString();
-    const cookieHeader = getCookieHeader(seriesResponse.headers.get("set-cookie"));
+    const cookieHeader = getCookieHeader(
+      seriesResponse.headers.get("set-cookie"),
+    );
     const unique = new Map<string, ChapterListItem>();
 
-    const methods: Array<"bootLoad" | "loadMore"> = ["bootLoad", ...Array.from({ length: 20 }, () => "loadMore" as const)];
+    const methods: Array<"bootLoad" | "loadMore"> = [
+      "bootLoad",
+      ...Array.from({ length: 20 }, () => "loadMore" as const),
+    ];
     for (const method of methods) {
       const nextSnapshot = await postManhwaZoneLivewire(
         endpoint,
@@ -565,7 +660,7 @@ async function fetchManhwaZoneLivewireChapterList(seriesUrl: string): Promise<Ch
         token,
         cookieHeader,
         snapshot,
-        method
+        method,
       );
       if (!nextSnapshot) {
         break;
@@ -588,7 +683,10 @@ async function fetchManhwaZoneLivewireChapterList(seriesUrl: string): Promise<Ch
   }
 }
 
-async function fetchSourceSeriesChapterList(chapterUrl: string, html: string): Promise<ChapterListItem[]> {
+async function fetchSourceSeriesChapterList(
+  chapterUrl: string,
+  html: string,
+): Promise<ChapterListItem[]> {
   const seriesUrl = findSourceSeriesUrlFromHtml(html, chapterUrl);
   if (!seriesUrl) {
     return [];
@@ -608,17 +706,24 @@ async function fetchSourceSeriesChapterList(chapterUrl: string, html: string): P
     }
 
     const $ = cheerio.load(fetched.html);
-    const discovered = extractChapterLinks($, CHAPTER_LINK_SELECTORS, fetched.finalUrl);
+    const discovered = extractChapterLinks(
+      $,
+      CHAPTER_LINK_SELECTORS,
+      fetched.finalUrl,
+    );
 
     if (isWeebCentralUrl(seriesUrl)) {
-      const fullChapterListUrl = getWeebCentralFullChapterListUrl($, fetched.finalUrl);
+      const fullChapterListUrl = getWeebCentralFullChapterListUrl(
+        $,
+        fetched.finalUrl,
+      );
       if (fullChapterListUrl) {
         const fullListFetched = await fetchChapterHtml(fullChapterListUrl);
         if (fullListFetched.status < 400 && fullListFetched.html) {
           const fullList = extractChapterLinks(
             cheerio.load(fullListFetched.html),
             CHAPTER_LINK_SELECTORS,
-            fullListFetched.finalUrl
+            fullListFetched.finalUrl,
           );
           if (fullList.length > discovered.length) {
             return fullList;
@@ -633,13 +738,20 @@ async function fetchSourceSeriesChapterList(chapterUrl: string, html: string): P
   }
 }
 
-function toAbsoluteUrl(baseUrl: string, value: string | null | undefined): string | null {
+function toAbsoluteUrl(
+  baseUrl: string,
+  value: string | null | undefined,
+): string | null {
   if (!value) {
     return null;
   }
 
   const trimmed = value.trim();
-  if (!trimmed || trimmed.startsWith("#") || /^(javascript|about|data):/i.test(trimmed)) {
+  if (
+    !trimmed ||
+    trimmed.startsWith("#") ||
+    /^(javascript|about|data):/i.test(trimmed)
+  ) {
     return null;
   }
 
@@ -658,19 +770,24 @@ function extractWeebcentralChapterId(url: string): string {
     }
 
     const segments = splitLowerPathSegments(parsed.pathname);
-    const chapterIndex = segments.findIndex((segment) => segment === "chapters");
+    const chapterIndex = segments.findIndex(
+      (segment) => segment === "chapters",
+    );
     if (chapterIndex < 0) {
       return "";
     }
 
-    const id = parsed.pathname.split("/").filter(Boolean)[chapterIndex + 1] ?? "";
+    const id =
+      parsed.pathname.split("/").filter(Boolean)[chapterIndex + 1] ?? "";
     return id.trim();
   } catch {
     return "";
   }
 }
 
-async function fetchWeebcentralLongStripPanels(chapterUrl: string): Promise<string[]> {
+async function fetchWeebcentralLongStripPanels(
+  chapterUrl: string,
+): Promise<string[]> {
   const chapterId = extractWeebcentralChapterId(chapterUrl);
   if (!chapterId) {
     return [];
@@ -704,10 +821,13 @@ async function fetchWeebcentralLongStripPanels(chapterUrl: string): Promise<stri
 
 function resolveFirstChapterUrlFromSeriesPage(
   seriesUrl: string,
-  extracted: ExtractedChapterData
+  extracted: ExtractedChapterData,
 ): string | null {
   const current = normalizeComparableUrl(seriesUrl);
-  const suggested = toAbsoluteUrl(seriesUrl, extracted.suggestedFirstChapterUrl);
+  const suggested = toAbsoluteUrl(
+    seriesUrl,
+    extracted.suggestedFirstChapterUrl,
+  );
 
   if (suggested && normalizeComparableUrl(suggested) !== current) {
     return suggested;
@@ -716,7 +836,7 @@ function resolveFirstChapterUrlFromSeriesPage(
   const candidates = mergeUniqueChapters(extracted.chapterList)
     .map((chapter) => ({
       ...chapter,
-      url: toAbsoluteUrl(seriesUrl, chapter.url) ?? chapter.url
+      url: toAbsoluteUrl(seriesUrl, chapter.url) ?? chapter.url,
     }))
     .filter((chapter) => {
       const normalized = normalizeComparableUrl(chapter.url);
@@ -757,15 +877,21 @@ async function extractFromUrl(chapterUrl: string): Promise<{
   const extracted = await extractChapterData({
     html: fetched.html,
     chapterUrl: fetched.finalUrl,
-    adapter
+    adapter,
   });
 
   const candidatePanelUrls = Array.from(
-    new Set(extracted.chapter.panelCandidates.map((candidate) => candidate.url))
+    new Set(
+      extracted.chapter.panelCandidates.map((candidate) => candidate.url),
+    ),
   );
-  let panelUrls = candidatePanelUrls.filter((url) => hasPanelEvidenceInHtml(fetched.html, url));
+  let panelUrls = candidatePanelUrls.filter((url) =>
+    hasPanelEvidenceInHtml(fetched.html, url),
+  );
   if (panelUrls.length < 2) {
-    const weebcentralPanels = await fetchWeebcentralLongStripPanels(fetched.finalUrl);
+    const weebcentralPanels = await fetchWeebcentralLongStripPanels(
+      fetched.finalUrl,
+    );
     if (weebcentralPanels.length >= 2) {
       panelUrls = weebcentralPanels;
     }
@@ -781,14 +907,21 @@ async function extractFromUrl(chapterUrl: string): Promise<{
     fetched,
     extracted,
     panelUrls,
-    hasChapterSignal
+    hasChapterSignal,
   };
 }
 
-async function ingestUrlInternal(rawUrl: string, depth: number): Promise<IngestResponse> {
+async function ingestUrlInternal(
+  rawUrl: string,
+  depth: number,
+): Promise<IngestResponse> {
   const parseResult = urlSchema.safeParse(rawUrl);
   if (!parseResult.success) {
-    throw new IngestError("INVALID_URL", "Please provide a valid chapter URL.", 400);
+    throw new IngestError(
+      "INVALID_URL",
+      "Please provide a valid chapter URL.",
+      400,
+    );
   }
 
   const chapterUrl = parseResult.data;
@@ -798,16 +931,25 @@ async function ingestUrlInternal(rawUrl: string, depth: number): Promise<IngestR
     return cached;
   }
 
-  const { adapter, fetched, extracted, panelUrls, hasChapterSignal } = await extractFromUrl(chapterUrl);
+  const { adapter, fetched, extracted, panelUrls, hasChapterSignal } =
+    await extractFromUrl(chapterUrl);
 
   const shouldResolveSeriesPage =
     depth < 1 &&
     panelUrls.length < 4 &&
-    (extracted.pageType === "series" || (!hasChapterSignal && extracted.chapterList.length > 0));
+    (extracted.pageType === "series" ||
+      (!hasChapterSignal && extracted.chapterList.length > 0));
 
   if (shouldResolveSeriesPage) {
-    const firstChapterUrl = resolveFirstChapterUrlFromSeriesPage(fetched.finalUrl, extracted);
-    if (firstChapterUrl && normalizeComparableUrl(firstChapterUrl) !== normalizeComparableUrl(fetched.finalUrl)) {
+    const firstChapterUrl = resolveFirstChapterUrlFromSeriesPage(
+      fetched.finalUrl,
+      extracted,
+    );
+    if (
+      firstChapterUrl &&
+      normalizeComparableUrl(firstChapterUrl) !==
+        normalizeComparableUrl(fetched.finalUrl)
+    ) {
       const resolved = await ingestUrlInternal(firstChapterUrl, depth + 1);
       parseCache.set(chapterUrl, resolved);
       return resolved;
@@ -818,7 +960,7 @@ async function ingestUrlInternal(rawUrl: string, depth: number): Promise<IngestR
     throw new IngestError(
       "NOT_CHAPTER",
       "This looks like a series or info page, but a readable first chapter could not be found.",
-      400
+      400,
     );
   }
 
@@ -828,73 +970,87 @@ async function ingestUrlInternal(rawUrl: string, depth: number): Promise<IngestR
       status: fetched.status,
       html: fetched.html,
       panelCount: panelUrls.length,
-      treatLowPanelCountAsLoginWall: looksLikeChapterUrl(fetched.finalUrl)
+      treatLowPanelCountAsLoginWall: looksLikeChapterUrl(fetched.finalUrl),
     })
   ) {
     throw new IngestError(
       "NOT_PUBLIC",
       "This source does not expose images externally. Try another source.",
-      403
+      403,
     );
   }
 
   if (panelUrls.length < 2) {
-    if (!looksLikeChapterUrl(fetched.finalUrl) && extracted.chapterList.length > 0) {
+    if (
+      !looksLikeChapterUrl(fetched.finalUrl) &&
+      extracted.chapterList.length > 0
+    ) {
       throw new IngestError(
         "NOT_CHAPTER",
         "This looks like a series page. Select a chapter and paste that chapter link.",
-        400
+        400,
       );
     }
 
     throw new IngestError(
       "NOT_CHAPTER",
       "This page does not expose panel image links in HTML. Open this chapter on the source site.",
-      400
+      400,
     );
   }
 
-  const sourceSeriesChapterList = await fetchSourceSeriesChapterList(fetched.finalUrl, fetched.html);
+  const sourceSeriesChapterList = await fetchSourceSeriesChapterList(
+    fetched.finalUrl,
+    fetched.html,
+  );
   const discoveredChapterList =
-    sourceSeriesChapterList.length > 0 ? sourceSeriesChapterList : extracted.chapterList;
+    sourceSeriesChapterList.length > 0
+      ? sourceSeriesChapterList
+      : extracted.chapterList;
   const chapterListInput = mergeUniqueChapters([
     ...discoveredChapterList,
     {
       number: extracted.chapter.number,
       title: extracted.chapter.title,
-      url: fetched.finalUrl
-    }
+      url: fetched.finalUrl,
+    },
   ]);
 
   const enrichedChapterList = await enrichSparseChapterList(
     fetched.finalUrl,
     extracted.series.title,
     extracted.chapterUrlPattern,
-    chapterListInput
+    chapterListInput,
   );
-  const seriesConstrainedChapterList = filterChapterListToSeries(fetched.finalUrl, enrichedChapterList);
+  const seriesConstrainedChapterList = filterChapterListToSeries(
+    fetched.finalUrl,
+    enrichedChapterList,
+  );
 
   const detectedMode =
     extracted.detectedModeHint ??
-    detectReadingMode(adapter?.defaultMode ?? "paginated", extracted.chapter.panelCandidates);
+    detectReadingMode(
+      adapter?.defaultMode ?? "paginated",
+      extracted.chapter.panelCandidates,
+    );
 
   const result: IngestResponse = {
     series: {
       title: extracted.series.title,
       coverUrl: extracted.series.coverUrl,
       genres: extracted.series.genres,
-      status: extracted.series.status
+      status: extracted.series.status,
     },
     chapter: {
       number: extracted.chapter.number,
       title: extracted.chapter.title,
       panelUrls,
-      totalPages: panelUrls.length
+      totalPages: panelUrls.length,
     },
     chapterList: sortChapterList(seriesConstrainedChapterList),
     detectedMode,
     sourceAdapter: adapter?.id ?? extracted.source,
-    extractionSource: extracted.source
+    extractionSource: extracted.source,
   };
 
   parseCache.set(chapterUrl, result);

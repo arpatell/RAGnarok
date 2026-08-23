@@ -1,0 +1,44 @@
+# Local approximation of e2-micro constraints for pre-deploy smoke testing.
+#
+# This is NOT a faithful latency reproduction — dev CPUs are much faster
+# per-core than e2-micro's shared burstable core. Use it to catch OOM kills,
+# swap thrash, and startup ordering issues before touching the real VM.
+# Authoritative latency/load numbers come from running scripts/gcp/benchmark.sh
+# and scripts/bench/run-load.mjs against the actual VM.
+#
+# Usage:
+#   docker compose -f scripts/bench/docker-compose.e2micro.yml up --build
+#
+# Memory budget mirrors production: 1GB RAM ceiling + 4GB swap headroom split
+# across backend (Node) and rag (Python). CPU capped at 0.5 cores total.
+
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: scripts/bench/Dockerfile.backend
+    mem_limit: 384m
+    memswap_limit: 2304m
+    cpus: 0.3
+    environment:
+      PORT: "8787"
+      RAG_API_URL: http://rag:8090/rag/search
+      MAL_CLIENT_ID: ${MAL_CLIENT_ID:-}
+    ports:
+      - "8787:8787"
+    depends_on:
+      - rag
+
+  rag:
+    build:
+      context: ../..
+      dockerfile: scripts/bench/Dockerfile.rag
+    mem_limit: 640m
+    memswap_limit: 2688m
+    cpus: 0.2
+    environment:
+      PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+      PINECONE_INDEX: ${PINECONE_INDEX:-}
+      PINECONE_NAMESPACE: ${PINECONE_NAMESPACE:-top-4000}
+    ports:
+      - "8090:8090"

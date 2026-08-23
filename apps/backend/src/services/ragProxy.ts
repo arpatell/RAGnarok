@@ -2,28 +2,45 @@ import { IngestError } from "../errors.js";
 
 const DEFAULT_RAG_API_URL = "http://127.0.0.1:8090/rag/search";
 const DEFAULT_TOP_K = 10;
-const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.RAG_REQUEST_TIMEOUT_MS ?? "8000", 10);
-const JIKAN_TIMEOUT_MS = Math.max(3_000, Number.parseInt(process.env.JIKAN_TIMEOUT_MS ?? "6500", 10));
-const JIKAN_BASE_URL = "https://api.jikan.moe/v4";
+const REQUEST_TIMEOUT_MS = Number.parseInt(
+  process.env.RAG_REQUEST_TIMEOUT_MS ?? "8000",
+  10,
+);
 const MAL_BASE_URL = "https://api.myanimelist.net/v2";
-const MAL_TITLE_ALIAS_TIMEOUT_MS = Math.max(1_000, Number.parseInt(process.env.MAL_TITLE_ALIAS_TIMEOUT_MS ?? "2500", 10));
-const MAL_TITLE_ALIAS_CACHE_TTL_MS = Math.max(60_000, Number.parseInt(process.env.MAL_TITLE_ALIAS_CACHE_TTL_MS ?? "1800000", 10));
-const JIKAN_MIN_INTERVAL_MS = Math.max(450, Number.parseInt(process.env.JIKAN_MIN_INTERVAL_MS ?? "700", 10));
-const JIKAN_MAX_RETRIES = Math.max(1, Number.parseInt(process.env.JIKAN_MAX_RETRIES ?? "3", 10));
-const JIKAN_CACHE_TTL_MS = Math.max(60_000, Number.parseInt(process.env.JIKAN_CACHE_TTL_MS ?? "300000", 10));
-const JIKAN_RETRYABLE_STATUS = new Set([408, 425, 500, 502, 503, 504, 520, 522, 524]);
-const JIKAN_ENRICH_TOP_N = Math.max(0, Number.parseInt(process.env.RAG_JIKAN_ENRICH_TOP_N ?? "2", 10));
-const JIKAN_ANIME_COMPANION_TOP_N = Math.max(0, Number.parseInt(process.env.RAG_JIKAN_ANIME_COMPANION_TOP_N ?? "0", 10));
-const RAG_RESPONSE_CACHE_TTL_MS = Math.max(0, Number.parseInt(process.env.RAG_RESPONSE_CACHE_TTL_MS ?? "300000", 10));
-const RAG_RESPONSE_CACHE_MAX = Math.max(0, Number.parseInt(process.env.RAG_RESPONSE_CACHE_MAX ?? "256", 10));
-const RAG_TITLE_ALIAS_QUERY_LIMIT = Math.max(0, Number.parseInt(process.env.RAG_TITLE_ALIAS_QUERY_LIMIT ?? "1", 10));
+const MAL_TITLE_ALIAS_TIMEOUT_MS = Math.max(
+  1_000,
+  Number.parseInt(process.env.MAL_TITLE_ALIAS_TIMEOUT_MS ?? "2500", 10),
+);
+const MAL_TITLE_ALIAS_CACHE_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.MAL_TITLE_ALIAS_CACHE_TTL_MS ?? "1800000", 10),
+);
+const RAG_RESPONSE_CACHE_TTL_MS = Math.max(
+  0,
+  Number.parseInt(process.env.RAG_RESPONSE_CACHE_TTL_MS ?? "3600000", 10),
+);
+const RAG_RESPONSE_CACHE_MAX = Math.max(
+  0,
+  Number.parseInt(process.env.RAG_RESPONSE_CACHE_MAX ?? "256", 10),
+);
+const RAG_TITLE_ALIAS_QUERY_LIMIT = Math.max(
+  0,
+  Number.parseInt(process.env.RAG_TITLE_ALIAS_QUERY_LIMIT ?? "1", 10),
+);
 
-let nextJikanRequestAt = 0;
-const jikanJsonCache = new Map<string, { expiresAt: number; value: unknown }>();
-const malTitleAliasCache = new Map<string, { expiresAt: number; value: TitleAliasCandidate[] }>();
-const ragResponseCache = new Map<string, { expiresAt: number; value: RagSearchResponse }>();
+const malTitleAliasCache = new Map<
+  string,
+  { expiresAt: number; value: TitleAliasCandidate[] }
+>();
+const ragResponseCache = new Map<
+  string,
+  { expiresAt: number; value: RagSearchResponse }
+>();
 const inFlightRagSearches = new Map<string, Promise<RagSearchResponse>>();
-const inFlightMalTitleAliasFetches = new Map<string, Promise<TitleAliasCandidate[]>>();
+const inFlightMalTitleAliasFetches = new Map<
+  string,
+  Promise<TitleAliasCandidate[]>
+>();
 
 type ResultSource = "pinecone";
 
@@ -53,48 +70,6 @@ interface RemoteRagPayload {
   } | null;
 }
 
-interface JikanImageVariant {
-  image_url?: string | null;
-  large_image_url?: string | null;
-  small_image_url?: string | null;
-}
-
-interface JikanRelationEntry {
-  mal_id?: number;
-  type?: string;
-  name?: string;
-}
-
-interface JikanRelation {
-  relation?: string;
-  entry?: JikanRelationEntry[];
-}
-
-interface JikanMediaData {
-  mal_id?: number;
-  title?: string | null;
-  title_english?: string | null;
-  title_japanese?: string | null;
-  title_synonyms?: string[] | null;
-  synopsis?: string | null;
-  type?: string | null;
-  status?: string | null;
-  chapters?: number | null;
-  volumes?: number | null;
-  episodes?: number | null;
-  score?: number | null;
-  genres?: Array<{ name?: string | null }>;
-  images?: {
-    jpg?: JikanImageVariant;
-    webp?: JikanImageVariant;
-  };
-  relations?: JikanRelation[];
-}
-
-interface JikanFullPayload {
-  data?: JikanMediaData;
-}
-
 interface AnimeCompanion {
   mal_id: number | null;
   title: string;
@@ -104,21 +79,6 @@ interface AnimeCompanion {
   image_url: string | null;
   watch_url: string;
   citation: string;
-}
-
-interface JikanEnrichment {
-  mediaType: JikanMediaType;
-  typeLabel: string | null;
-  title: string;
-  synopsis: string;
-  genres: string[];
-  status: string | null;
-  chapters: number | null;
-  volumes: number | null;
-  episodes: number | null;
-  score: number | null;
-  imageUrl: string | null;
-  animeCompanion: AnimeCompanion | null;
 }
 
 export interface RagSearchResult {
@@ -169,19 +129,6 @@ interface RagSearchOptions {
   mediaTypeFilter?: JikanMediaType | null;
 }
 
-export interface RagResultLiveMetadata {
-  mal_id: number;
-  media_type: string;
-  display_type: string | null;
-  title: string;
-  image_url: string | null;
-  status: string | null;
-  chapters: number | null;
-  volumes: number | null;
-  episodes: number | null;
-  jikan_score: number | null;
-}
-
 function cleanText(value: unknown): string {
   if (typeof value !== "string") {
     return "";
@@ -204,23 +151,19 @@ function buildReadOptions(title: string): Record<string, string> {
   const encoded = encodeTitle(title);
   return {
     weebcentral: `https://weebcentral.com/search?text=${encoded}&sort=Best+Match&order=Descending&official=Any&anime=Any&adult=Any&display_mode=Full+Display`,
-    manhwazone: `https://manhwazone.com/search?keyword=${encoded}`
+    manhwazone: `https://manhwazone.com/search?keyword=${encoded}`,
   };
 }
 
 function buildWatchOptions(title: string): Record<string, string> {
-  const keyword = title
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .join("+");
+  const keyword = title.trim().split(/\s+/).filter(Boolean).join("+");
 
   if (!keyword) {
     return {};
   }
 
   return {
-    anikaitv: `https://anikaitv.to/filter?keyword=${keyword}`
+    anikaitv: `https://anikaitv.to/filter?keyword=${keyword}`,
   };
 }
 
@@ -231,7 +174,10 @@ function buildCitation(malId: number | null, title: string): string {
   return `[Source: MAL-ID unknown - ${title}]`;
 }
 
-function normalizeCitationList(citation: string | undefined, fallback: string): string[] {
+function normalizeCitationList(
+  citation: string | undefined,
+  fallback: string,
+): string[] {
   const normalized = cleanText(citation || "");
   if (!normalized) {
     return [fallback];
@@ -244,37 +190,6 @@ function normalizeCitationList(citation: string | undefined, fallback: string): 
   return [fallback, normalized];
 }
 
-function extractImageUrl(images: JikanMediaData["images"]): string | null {
-  const candidates: Array<string | null | undefined> = [
-    images?.jpg?.large_image_url,
-    images?.jpg?.image_url,
-    images?.jpg?.small_image_url,
-    images?.webp?.large_image_url,
-    images?.webp?.image_url,
-    images?.webp?.small_image_url
-  ];
-
-  for (const candidate of candidates) {
-    const clean = cleanText(candidate);
-    if (clean) {
-      return clean;
-    }
-  }
-
-  return null;
-}
-
-function extractGenres(data: JikanMediaData): string[] {
-  if (!Array.isArray(data.genres)) {
-    return [];
-  }
-
-  return data.genres
-    .map((genre) => cleanText(genre?.name))
-    .filter((genre) => genre.length > 0)
-    .slice(0, 8);
-}
-
 function normalizeTitleForMatch(value: string): string {
   return cleanText(value)
     .toLowerCase()
@@ -284,7 +199,12 @@ function normalizeTitleForMatch(value: string): string {
 }
 
 function cloneRagResponse(value: RagSearchResponse): RagSearchResponse {
-  return JSON.parse(JSON.stringify(value)) as RagSearchResponse;
+  try {
+    return JSON.parse(JSON.stringify(value)) as RagSearchResponse;
+  } catch {
+    // Structured-clone fallback for responses that fail JSON round-trip.
+    return value;
+  }
 }
 
 function getCachedRagResponse(cacheKey: string): RagSearchResponse | null {
@@ -305,8 +225,15 @@ function getCachedRagResponse(cacheKey: string): RagSearchResponse | null {
   return cloneRagResponse(cached.value);
 }
 
-function setCachedRagResponse(cacheKey: string, value: RagSearchResponse): void {
-  if (!cacheKey || RAG_RESPONSE_CACHE_TTL_MS <= 0 || RAG_RESPONSE_CACHE_MAX <= 0) {
+function setCachedRagResponse(
+  cacheKey: string,
+  value: RagSearchResponse,
+): void {
+  if (
+    !cacheKey ||
+    RAG_RESPONSE_CACHE_TTL_MS <= 0 ||
+    RAG_RESPONSE_CACHE_MAX <= 0
+  ) {
     return;
   }
 
@@ -320,7 +247,7 @@ function setCachedRagResponse(cacheKey: string, value: RagSearchResponse): void 
 
   ragResponseCache.set(cacheKey, {
     expiresAt: Date.now() + RAG_RESPONSE_CACHE_TTL_MS,
-    value: cloneRagResponse(value)
+    value: cloneRagResponse(value),
   });
 }
 
@@ -336,17 +263,21 @@ function editDistance(left: string, right: string): number {
     return 0;
   }
 
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const previous = Array.from(
+    { length: right.length + 1 },
+    (_, index) => index,
+  );
   const current = Array.from({ length: right.length + 1 }, () => 0);
 
   for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
     current[0] = leftIndex;
     for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      const substitutionCost =
+        left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
       current[rightIndex] = Math.min(
         (previous[rightIndex] ?? 0) + 1,
         (current[rightIndex - 1] ?? 0) + 1,
-        (previous[rightIndex - 1] ?? 0) + substitutionCost
+        (previous[rightIndex - 1] ?? 0) + substitutionCost,
       );
     }
     for (let rightIndex = 0; rightIndex <= right.length; rightIndex += 1) {
@@ -357,7 +288,10 @@ function editDistance(left: string, right: string): number {
   return previous[right.length] ?? Math.max(left.length, right.length);
 }
 
-function tokenTypoSimilarity(queryToken: string, candidateToken: string): number {
+function tokenTypoSimilarity(
+  queryToken: string,
+  candidateToken: string,
+): number {
   if (queryToken === candidateToken) {
     return 1;
   }
@@ -374,7 +308,10 @@ function tokenTypoSimilarity(queryToken: string, candidateToken: string): number
   return 1 - distance / maxLength;
 }
 
-function fuzzyTitleTokenScore(queryTokens: string[], candidateTokens: string[]): number {
+function fuzzyTitleTokenScore(
+  queryTokens: string[],
+  candidateTokens: string[],
+): number {
   if (queryTokens.length === 0 || candidateTokens.length === 0) {
     return 0;
   }
@@ -390,7 +327,10 @@ function fuzzyTitleTokenScore(queryTokens: string[], candidateTokens: string[]):
         continue;
       }
 
-      const score = tokenTypoSimilarity(queryToken, candidateTokens[index] ?? "");
+      const score = tokenTypoSimilarity(
+        queryToken,
+        candidateTokens[index] ?? "",
+      );
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -443,7 +383,18 @@ function titleSimilarityScore(query: string, candidate: string): number {
 }
 
 function splitFusedShortSuffixes(query: string): string {
-  const suffixes = ["euro", "reul", "neun", "eul", "eun", "gwa", "ui", "wa", "ro", "ga"];
+  const suffixes = [
+    "euro",
+    "reul",
+    "neun",
+    "eul",
+    "eun",
+    "gwa",
+    "ui",
+    "wa",
+    "ro",
+    "ga",
+  ];
   const tokens = cleanText(query).split(/\s+/).filter(Boolean);
   let changed = false;
   const nextTokens: string[] = [];
@@ -451,7 +402,9 @@ function splitFusedShortSuffixes(query: string): string {
   for (const token of tokens) {
     const normalizedToken = token.toLowerCase();
     const suffix = suffixes.find(
-      (candidate) => normalizedToken.endsWith(candidate) && normalizedToken.length >= candidate.length + 5
+      (candidate) =>
+        normalizedToken.endsWith(candidate) &&
+        normalizedToken.length >= candidate.length + 5,
     );
     if (!suffix) {
       nextTokens.push(token);
@@ -461,7 +414,11 @@ function splitFusedShortSuffixes(query: string): string {
     changed = true;
     const stem = token.slice(0, -suffix.length);
     const normalizedStem = stem.toLowerCase();
-    nextTokens.push(normalizedStem.endsWith("e") && suffix === "ui" ? stem.slice(0, -1) : stem);
+    nextTokens.push(
+      normalizedStem.endsWith("e") && suffix === "ui"
+        ? stem.slice(0, -1)
+        : stem,
+    );
     nextTokens.push(suffix);
   }
 
@@ -487,29 +444,6 @@ function buildMalTitleLookupQueries(query: string): string[] {
   return queries.slice(0, 2);
 }
 
-function collectJikanTitleCandidates(data: JikanMediaData): string[] {
-  const values = [
-    data.title_english,
-    data.title,
-    data.title_japanese,
-    ...(Array.isArray(data.title_synonyms) ? data.title_synonyms : [])
-  ];
-  const seen = new Set<string>();
-  const titles: string[] = [];
-
-  for (const value of values) {
-    const title = cleanText(value);
-    const key = normalizeTitleForMatch(title);
-    if (!title || !key || seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    titles.push(title);
-  }
-
-  return titles;
-}
-
 function looksLikeTitleSearch(query: string): boolean {
   const normalized = cleanText(query);
   if (!normalized) {
@@ -525,7 +459,9 @@ function looksLikeTitleSearch(query: string): boolean {
     return false;
   }
 
-  return !/\b(?:find|finds|found|about|where|who|what|when|why|how|recommend|similar|like|with|without|boy|girl|guy|man|woman|mc|main character|character|kills?|dies?|reincarnat|transported|isekai|revenge|overpowered|betrayed|school|vampire|hunter|demon|plot)\b/i.test(normalized);
+  return !/\b(?:find|finds|found|about|where|who|what|when|why|how|recommend|similar|like|with|without|boy|girl|guy|man|woman|mc|main character|character|kills?|dies?|reincarnat|transported|isekai|revenge|overpowered|betrayed|school|vampire|hunter|demon|plot)\b/i.test(
+    normalized,
+  );
 }
 
 function isLatinTitleAlias(value: string): boolean {
@@ -566,100 +502,10 @@ interface MalSearchPayload {
   data?: MalSearchRow[];
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function computeRetryDelayMs(attempt: number, retryAfterHeader: string | null): number {
-  if (retryAfterHeader) {
-    const retryAfterSeconds = Number.parseInt(retryAfterHeader, 10);
-    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
-      return Math.min(8_000, retryAfterSeconds * 1000);
-    }
-
-    const retryDateMs = Date.parse(retryAfterHeader);
-    if (Number.isFinite(retryDateMs)) {
-      const delta = retryDateMs - Date.now();
-      if (delta > 0) {
-        return Math.min(8_000, delta);
-      }
-    }
-  }
-
-  const exponential = Math.min(8_000, 300 * 2 ** attempt);
-  const jitter = Math.floor(Math.random() * 250);
-  return exponential + jitter;
-}
-
-async function waitForJikanSlot(): Promise<void> {
-  const now = Date.now();
-  const waitFor = nextJikanRequestAt - now;
-  if (waitFor > 0) {
-    await delay(waitFor);
-  }
-  nextJikanRequestAt = Date.now() + JIKAN_MIN_INTERVAL_MS;
-}
-
-async function fetchJikanJson<T>(url: string, timeoutMs: number): Promise<T> {
-  const cached = jikanJsonCache.get(url);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value as T;
-  }
-
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt < JIKAN_MAX_RETRIES; attempt += 1) {
-    await waitForJikanSlot();
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        signal: AbortSignal.timeout(timeoutMs),
-        headers: {
-          Accept: "application/json",
-          "Cache-Control": "no-cache",
-          "User-Agent": "PanelFlow-RAG/2.1"
-        }
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      lastError = new Error(`Request failed: ${message}`);
-      if (attempt < JIKAN_MAX_RETRIES - 1) {
-        await delay(computeRetryDelayMs(attempt, null));
-        continue;
-      }
-      throw lastError;
-    }
-
-    if (response.ok) {
-      const payload = (await response.json()) as T;
-      jikanJsonCache.set(url, {
-        expiresAt: Date.now() + JIKAN_CACHE_TTL_MS,
-        value: payload
-      });
-      return payload;
-    }
-
-    const body = await response.text().catch(() => "");
-    const message = `HTTP ${response.status}: ${body.slice(0, 220)}`;
-    lastError = new Error(message);
-
-    if (response.status === 429) {
-      throw lastError;
-    }
-
-    if (!JIKAN_RETRYABLE_STATUS.has(response.status) || attempt >= JIKAN_MAX_RETRIES - 1) {
-      throw lastError;
-    }
-
-    await delay(computeRetryDelayMs(attempt, response.headers.get("retry-after")));
-  }
-
-  throw lastError ?? new Error("Jikan request failed after retries.");
-}
-
 function getMalClientId(): string {
-  return cleanText(process.env.MAL_CLIENT_ID ?? process.env.MYANIMELIST_CLIENT_ID);
+  return cleanText(
+    process.env.MAL_CLIENT_ID ?? process.env.MYANIMELIST_CLIENT_ID,
+  );
 }
 
 function collectMalTitleCandidates(node: MalSearchNode): string[] {
@@ -667,7 +513,9 @@ function collectMalTitleCandidates(node: MalSearchNode): string[] {
     node.title,
     node.alternative_titles?.en,
     node.alternative_titles?.ja,
-    ...(Array.isArray(node.alternative_titles?.synonyms) ? node.alternative_titles.synonyms : [])
+    ...(Array.isArray(node.alternative_titles?.synonyms)
+      ? node.alternative_titles.synonyms
+      : []),
   ];
   const seen = new Set<string>();
   const titles: string[] = [];
@@ -685,7 +533,9 @@ function collectMalTitleCandidates(node: MalSearchNode): string[] {
   return titles;
 }
 
-async function fetchMalTitleAliasCandidates(query: string): Promise<TitleAliasCandidate[]> {
+async function fetchMalTitleAliasCandidates(
+  query: string,
+): Promise<TitleAliasCandidate[]> {
   if (!looksLikeTitleSearch(query)) {
     return [];
   }
@@ -706,7 +556,11 @@ async function fetchMalTitleAliasCandidates(query: string): Promise<TitleAliasCa
     return inFlight;
   }
 
-  const fetchPromise = fetchMalTitleAliasCandidatesUncached(query, cacheKey, clientId);
+  const fetchPromise = fetchMalTitleAliasCandidatesUncached(
+    query,
+    cacheKey,
+    clientId,
+  );
   inFlightMalTitleAliasFetches.set(cacheKey, fetchPromise);
 
   try {
@@ -719,7 +573,7 @@ async function fetchMalTitleAliasCandidates(query: string): Promise<TitleAliasCa
 async function fetchMalTitleAliasCandidatesUncached(
   query: string,
   cacheKey: string,
-  clientId: string
+  clientId: string,
 ): Promise<TitleAliasCandidate[]> {
   const mediaTypes = ["manga", "anime"] as const;
   const lookupQueries = buildMalTitleLookupQueries(query);
@@ -732,12 +586,18 @@ async function fetchMalTitleAliasCandidatesUncached(
         url.searchParams.set("q", lookupQuery);
         url.searchParams.set("limit", "5");
         url.searchParams.set("fields", "id,title,alternative_titles");
+        if (
+          url.protocol !== "https:" ||
+          url.hostname !== "api.myanimelist.net"
+        ) {
+          continue;
+        }
         const response = await fetch(url.toString(), {
           signal: AbortSignal.timeout(MAL_TITLE_ALIAS_TIMEOUT_MS),
           headers: {
             Accept: "application/json",
-            "X-MAL-CLIENT-ID": clientId
-          }
+            "X-MAL-CLIENT-ID": clientId,
+          },
         });
         if (!response.ok) {
           continue;
@@ -754,14 +614,23 @@ async function fetchMalTitleAliasCandidatesUncached(
 
           const titles = collectMalTitleCandidates(node);
           const score = Math.max(
-            ...titles.map((title) => Math.max(titleSimilarityScore(query, title), titleSimilarityScore(lookupQuery, title))),
-            0
+            ...titles.map((title) =>
+              Math.max(
+                titleSimilarityScore(query, title),
+                titleSimilarityScore(lookupQuery, title),
+              ),
+            ),
+            0,
           );
           if (score < 0.72) {
             continue;
           }
 
-          const preferredTitle = cleanText(node.title) || cleanText(node.alternative_titles?.en) || titles[0] || "";
+          const preferredTitle =
+            cleanText(node.title) ||
+            cleanText(node.alternative_titles?.en) ||
+            titles[0] ||
+            "";
           const key = normalizeTitleForMatch(preferredTitle);
           if (!preferredTitle || !key) {
             continue;
@@ -773,7 +642,7 @@ async function fetchMalTitleAliasCandidatesUncached(
               title: preferredTitle,
               malId: safeNumber(node.id),
               score,
-              candidates: titles
+              candidates: titles,
             });
           }
         }
@@ -793,7 +662,12 @@ async function fetchMalTitleAliasCandidatesUncached(
 
   if (byTitle.size > 1) {
     for (const [key, candidate] of byTitle) {
-      const bestTitleScore = Math.max(...candidate.candidates.map((title) => titleSimilarityScore(query, title)), 0);
+      const bestTitleScore = Math.max(
+        ...candidate.candidates.map((title) =>
+          titleSimilarityScore(query, title),
+        ),
+        0,
+      );
       if (bestTitleScore < 0.5) {
         byTitle.delete(key);
       }
@@ -806,13 +680,16 @@ async function fetchMalTitleAliasCandidatesUncached(
 
   malTitleAliasCache.set(cacheKey, {
     expiresAt: Date.now() + MAL_TITLE_ALIAS_CACHE_TTL_MS,
-    value: aliases
+    value: aliases,
   });
 
   return aliases;
 }
 
-function buildTitleAliasSearches(query: string, aliases: TitleAliasCandidate[]): Array<{ query: string; alias: TitleAliasCandidate }> {
+function buildTitleAliasSearches(
+  query: string,
+  aliases: TitleAliasCandidate[],
+): Array<{ query: string; alias: TitleAliasCandidate }> {
   if (RAG_TITLE_ALIAS_QUERY_LIMIT <= 0) {
     return [];
   }
@@ -857,7 +734,7 @@ function parseDisplayTypeFromSnippet(snippet: string): string | null {
     "synopsis:",
     "characters:",
     "character search aliases:",
-    "genres:"
+    "genres:",
   ]);
   if (!extracted) {
     return null;
@@ -867,30 +744,10 @@ function parseDisplayTypeFromSnippet(snippet: string): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function parseMediaHint(value: string | null | undefined): JikanMediaType | null {
-  const normalized = cleanText(value).toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-
-  if (normalized.includes("anime")) {
-    return "anime";
-  }
-
-  if (
-    normalized.includes("manga") ||
-    normalized.includes("manhwa") ||
-    normalized.includes("manhua") ||
-    normalized.includes("novel") ||
-    normalized.includes("doujin")
-  ) {
-    return "manga";
-  }
-
-  return null;
-}
-
-function parseAppendedMediaTypeFilter(query: string): { query: string; mediaTypeFilter: JikanMediaType | null } {
+function parseAppendedMediaTypeFilter(query: string): {
+  query: string;
+  mediaTypeFilter: JikanMediaType | null;
+} {
   const normalized = cleanText(query);
   const match = normalized.match(/(?:^|\s)(anime|manga|manhwa|manhua)\s*$/i);
   if (!match || match.index === undefined) {
@@ -905,20 +762,22 @@ function parseAppendedMediaTypeFilter(query: string): { query: string; mediaType
   const mediaWord = match[1]?.toLowerCase();
   return {
     query: stripped,
-    mediaTypeFilter: mediaWord === "anime" ? "anime" : "manga"
+    mediaTypeFilter: mediaWord === "anime" ? "anime" : "manga",
   };
 }
 
 function filterRagResponseByMediaType(
   response: RagSearchResponse,
   mediaTypeFilter: JikanMediaType | null,
-  displayQuery: string
+  displayQuery: string,
 ): RagSearchResponse {
   if (!mediaTypeFilter) {
     return response;
   }
 
-  const results = response.results.filter((result) => cleanText(result.media_type).toLowerCase() === mediaTypeFilter);
+  const results = response.results.filter(
+    (result) => cleanText(result.media_type).toLowerCase() === mediaTypeFilter,
+  );
   const first = results[0] ?? null;
 
   return {
@@ -932,11 +791,15 @@ function filterRagResponseByMediaType(
       ? response.retrieval_mode
       : `${response.retrieval_mode}_type_filter`,
     results,
-    highlight: first ? buildFallbackHighlight(first, displayQuery) : null
+    highlight: first ? buildFallbackHighlight(first, displayQuery) : null,
   };
 }
 
-function extractSnippetSection(snippet: string, marker: string, stopMarkers: string[]): string {
+function extractSnippetSection(
+  snippet: string,
+  marker: string,
+  stopMarkers: string[],
+): string {
   const normalized = cleanText(snippet);
   if (!normalized) {
     return "";
@@ -974,7 +837,7 @@ function extractSynopsisFromSnippet(snippet: string): string {
     "character search aliases:",
     "genres:",
     "type:",
-    "title:"
+    "title:",
   ]);
 
   if (!extracted || /^unknown$/i.test(extracted)) {
@@ -989,7 +852,7 @@ function extractGenresFromSnippet(snippet: string): string[] {
     "character search aliases:",
     "synopsis:",
     "type:",
-    "title:"
+    "title:",
   ]);
   if (!extracted || /^unknown$/i.test(extracted)) {
     return [];
@@ -1022,7 +885,7 @@ function extractCharactersFromSnippet(snippet: string): string[] {
     "genres:",
     "synopsis:",
     "type:",
-    "title:"
+    "title:",
   ]);
   if (!extracted || /^(unknown|none)$/i.test(extracted)) {
     return [];
@@ -1034,7 +897,9 @@ function extractCharactersFromSnippet(snippet: string): string[] {
   const characters: string[] = [];
 
   for (const token of tokens) {
-    const value = cleanText(token).replace(/\s*-\s*.*$/, "").trim();
+    const value = cleanText(token)
+      .replace(/\s*-\s*.*$/, "")
+      .trim();
     if (!value || value.length < 2) {
       continue;
     }
@@ -1052,114 +917,6 @@ function extractCharactersFromSnippet(snippet: string): string[] {
   return characters;
 }
 
-async function fetchAnimeCompanion(
-  mangaTitle: string,
-  mangaFull: JikanMediaData
-): Promise<AnimeCompanion | null> {
-  const relations = Array.isArray(mangaFull.relations) ? mangaFull.relations : [];
-  const adaptation = relations.find((row) => cleanText(row.relation).toLowerCase() === "adaptation");
-  const animeEntry = adaptation?.entry?.find((entry) => cleanText(entry.type).toLowerCase() === "anime");
-
-  let animeData: JikanMediaData | null = null;
-
-  if (animeEntry?.mal_id && Number.isFinite(animeEntry.mal_id)) {
-    try {
-      const payload = await fetchJikanJson<JikanFullPayload>(
-        `${JIKAN_BASE_URL}/anime/${animeEntry.mal_id}/full`,
-        JIKAN_TIMEOUT_MS
-      );
-      animeData = payload.data ?? null;
-    } catch {
-      animeData = null;
-    }
-  }
-
-  if (!animeData) {
-    try {
-      const searchUrl = new URL(`${JIKAN_BASE_URL}/anime`);
-      searchUrl.searchParams.set("q", mangaTitle);
-      searchUrl.searchParams.set("limit", "1");
-      const payload = await fetchJikanJson<{ data?: JikanMediaData[] }>(searchUrl.toString(), JIKAN_TIMEOUT_MS);
-      animeData = Array.isArray(payload.data) && payload.data.length > 0 ? payload.data[0] ?? null : null;
-    } catch {
-      animeData = null;
-    }
-  }
-
-  if (!animeData) {
-    return null;
-  }
-
-  const title =
-    cleanText(animeData.title_english) ||
-    cleanText(animeData.title) ||
-    cleanText(animeData.title_japanese) ||
-    cleanText(mangaTitle);
-  const malId = safeNumber(animeData.mal_id);
-
-  return {
-    mal_id: malId,
-    title,
-    status: cleanText(animeData.status) || null,
-    episodes: safeNumber(animeData.episodes),
-    score: safeNumber(animeData.score),
-    image_url: extractImageUrl(animeData.images),
-    watch_url: buildWatchOptions(title).anikaitv ?? "",
-    citation: buildCitation(malId, title)
-  };
-}
-
-async function fetchJikanDetails(
-  malId: number,
-  fallbackTitle: string,
-  preferredMediaType: JikanMediaType | null,
-  includeAnimeCompanion: boolean
-): Promise<JikanEnrichment | null> {
-  const mediaTypeOrder: JikanMediaType[] = preferredMediaType
-    ? [preferredMediaType, preferredMediaType === "manga" ? "anime" : "manga"]
-    : ["manga", "anime"];
-
-  for (const mediaType of mediaTypeOrder) {
-    try {
-      const payload = await fetchJikanJson<JikanFullPayload>(`${JIKAN_BASE_URL}/${mediaType}/${malId}/full`, JIKAN_TIMEOUT_MS);
-      const data = payload.data;
-      if (!data) {
-        continue;
-      }
-
-      const canonicalTitle =
-        cleanText(data.title_english) ||
-        cleanText(data.title) ||
-        cleanText(data.title_japanese) ||
-        fallbackTitle;
-
-      const enrichment: JikanEnrichment = {
-        mediaType,
-        typeLabel: cleanText(data.type) || null,
-        title: canonicalTitle,
-        synopsis: cleanText(data.synopsis),
-        genres: extractGenres(data),
-        status: cleanText(data.status) || null,
-        chapters: safeNumber(data.chapters),
-        volumes: safeNumber(data.volumes),
-        episodes: safeNumber(data.episodes),
-        score: safeNumber(data.score),
-        imageUrl: extractImageUrl(data.images),
-        animeCompanion:
-          includeAnimeCompanion && mediaType === "manga"
-            ? await fetchAnimeCompanion(canonicalTitle, data)
-            : null
-      };
-
-      return enrichment;
-    } catch {
-      // Try next media type.
-    }
-  }
-
-  return null;
-}
-
 async function callHybridRagService(query: string): Promise<RemoteRagPayload> {
   const raw = process.env.RAG_API_URL?.trim();
   const target = raw && raw.length > 0 ? raw : DEFAULT_RAG_API_URL;
@@ -1171,9 +928,9 @@ async function callHybridRagService(query: string): Promise<RemoteRagPayload> {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       headers: {
         "Content-Type": "application/json",
-        Accept: "application/json"
+        Accept: "application/json",
       },
-      body: JSON.stringify({ query })
+      body: JSON.stringify({ query }),
     });
   } catch (error) {
     const base = error instanceof Error ? error.message : String(error);
@@ -1191,7 +948,7 @@ async function callHybridRagService(query: string): Promise<RemoteRagPayload> {
     throw new IngestError(
       "INGEST_FAILED",
       `Smart Search backend is unavailable (${message}). Start the Python RAG service and retry.`,
-      502
+      502,
     );
   }
 
@@ -1200,7 +957,7 @@ async function callHybridRagService(query: string): Promise<RemoteRagPayload> {
     throw new IngestError(
       "INGEST_FAILED",
       `Smart Search service failed (${response.status}). ${rawBody.slice(0, 180)}`,
-      502
+      502,
     );
   }
 
@@ -1223,17 +980,24 @@ function normalizeRemoteResults(payload: RemoteRagPayload): RemoteRagResult[] {
   return [];
 }
 
-function buildFallbackHighlight(result: RagSearchResult, query: string): RagSearchResponse["highlight"] {
-  const citation = result.citations[0] ?? buildCitation(result.mal_id, result.title);
+function buildFallbackHighlight(
+  result: RagSearchResult,
+  query: string,
+): RagSearchResponse["highlight"] {
+  const citation =
+    result.citations[0] ?? buildCitation(result.mal_id, result.title);
   return {
     title: result.title,
     mal_id: result.mal_id,
     justification: `Top match for "${query}" is ${result.title}. ${citation}`,
-    citation
+    citation,
   };
 }
 
-async function searchMangaRagSingle(query: string, mediaTypeFilter: JikanMediaType | null = null): Promise<RagSearchResponse> {
+async function searchMangaRagSingle(
+  query: string,
+  mediaTypeFilter: JikanMediaType | null = null,
+): Promise<RagSearchResponse> {
   const normalized = cleanText(query);
   if (!normalized) {
     return {
@@ -1241,7 +1005,7 @@ async function searchMangaRagSingle(query: string, mediaTypeFilter: JikanMediaTy
       answer: "",
       retrieval_mode: "hybrid_cache",
       results: [],
-      highlight: null
+      highlight: null,
     };
   }
 
@@ -1256,7 +1020,10 @@ async function searchMangaRagSingle(query: string, mediaTypeFilter: JikanMediaTy
     return cloneRagResponse(await inFlight);
   }
 
-  const searchPromise = searchMangaRagSingleUncached(normalized, mediaTypeFilter);
+  const searchPromise = searchMangaRagSingleUncached(
+    normalized,
+    mediaTypeFilter,
+  );
   inFlightRagSearches.set(cacheKey, searchPromise);
 
   try {
@@ -1270,9 +1037,8 @@ async function searchMangaRagSingle(query: string, mediaTypeFilter: JikanMediaTy
 
 async function searchMangaRagSingleUncached(
   normalized: string,
-  mediaTypeFilter: JikanMediaType | null = null
+  mediaTypeFilter: JikanMediaType | null = null,
 ): Promise<RagSearchResponse> {
-
   const remote = await callHybridRagService(normalized);
   const remoteAnswer = cleanText(remote.answer);
   const remoteResults = normalizeRemoteResults(remote).slice(0, DEFAULT_TOP_K);
@@ -1287,7 +1053,10 @@ async function searchMangaRagSingleUncached(
     const citation = buildCitation(malId, title);
     const mediaType = preferredMediaType ?? "unknown";
     const displayType = parseDisplayTypeFromSnippet(snippet) || mediaType;
-    const synopsis = extractSynopsisFromSnippet(snippet) || snippet || "No synopsis available.";
+    const synopsis =
+      extractSynopsisFromSnippet(snippet) ||
+      snippet ||
+      "No synopsis available.";
     const characters = extractCharactersFromSnippet(snippet);
     const genres = extractGenresFromSnippet(snippet);
     const source: ResultSource = "pinecone";
@@ -1312,55 +1081,60 @@ async function searchMangaRagSingleUncached(
       jikan_score: null,
       read_options: buildReadOptions(title),
       watch_options: buildWatchOptions(title),
-      anime_companion: null
+      anime_companion: null,
     } satisfies RagSearchResult);
   }
 
   const filteredResults = mediaTypeFilter
-    ? enrichedResults.filter((result) => cleanText(result.media_type).toLowerCase() === mediaTypeFilter)
+    ? enrichedResults.filter(
+        (result) =>
+          cleanText(result.media_type).toLowerCase() === mediaTypeFilter,
+      )
     : enrichedResults;
   const first = filteredResults[0] ?? null;
   const highlightImageUrl = cleanText(remote.highlight?.image_url) || null;
   if (first && !first.image_url && highlightImageUrl) {
     first.image_url = highlightImageUrl;
   }
-  const highlight = mediaTypeFilter && first
-    ? buildFallbackHighlight(first, normalized)
-    : first
-    ? (() => {
-        const citation =
-          cleanText(remote.highlight?.citation) || first.citations[0] || buildCitation(first.mal_id, first.title);
-        const justification =
-          cleanText(remote.highlight?.justification) ||
-          remoteAnswer ||
-          buildFallbackHighlight(first, normalized)?.justification ||
-          "Top result selected from hybrid retrieval.";
+  const highlight =
+    mediaTypeFilter && first
+      ? buildFallbackHighlight(first, normalized)
+      : first
+        ? (() => {
+            const citation =
+              cleanText(remote.highlight?.citation) ||
+              first.citations[0] ||
+              buildCitation(first.mal_id, first.title);
+            const justification =
+              cleanText(remote.highlight?.justification) ||
+              remoteAnswer ||
+              buildFallbackHighlight(first, normalized)?.justification ||
+              "Top result selected from hybrid retrieval.";
 
-        return {
-          title: cleanText(remote.highlight?.title) || first.title,
-          mal_id: safeNumber(remote.highlight?.mal_id) ?? first.mal_id,
-          justification,
-          citation
-        };
-      })()
-    : null;
+            return {
+              title: cleanText(remote.highlight?.title) || first.title,
+              mal_id: safeNumber(remote.highlight?.mal_id) ?? first.mal_id,
+              justification,
+              citation,
+            };
+          })()
+        : null;
 
   return {
     query: normalized,
-    answer:
-      mediaTypeFilter
-        ? filteredResults.length > 0
-          ? `Found ${filteredResults.length} ${mediaTypeFilter} matches.`
-          : `No ${mediaTypeFilter} Smart Search matches found.`
-        : remoteAnswer ||
-          (filteredResults.length > 0
-            ? `Found ${filteredResults.length} strong matches.`
-            : "No Smart Search matches found."),
+    answer: mediaTypeFilter
+      ? filteredResults.length > 0
+        ? `Found ${filteredResults.length} ${mediaTypeFilter} matches.`
+        : `No ${mediaTypeFilter} Smart Search matches found.`
+      : remoteAnswer ||
+        (filteredResults.length > 0
+          ? `Found ${filteredResults.length} strong matches.`
+          : "No Smart Search matches found."),
     retrieval_mode: mediaTypeFilter
       ? `${cleanText(remote.retrieval_mode) || "hybrid_cache"}_type_filter`
       : cleanText(remote.retrieval_mode) || "hybrid_cache",
     results: filteredResults,
-    highlight
+    highlight,
   };
 }
 
@@ -1371,7 +1145,10 @@ function resultMergeKey(result: RagSearchResult): string {
   return `title:${normalizeTitleForMatch(result.title)}`;
 }
 
-function mergeTitleCandidates(existing: string[] | undefined, next: string[] | undefined): string[] {
+function mergeTitleCandidates(
+  existing: string[] | undefined,
+  next: string[] | undefined,
+): string[] {
   const seen = new Set<string>();
   const merged: string[] = [];
   for (const title of [...(existing ?? []), ...(next ?? [])]) {
@@ -1388,7 +1165,10 @@ function mergeTitleCandidates(existing: string[] | undefined, next: string[] | u
 
 function mergeRagResponses(
   query: string,
-  entries: Array<{ response: RagSearchResponse; alias: TitleAliasCandidate | null }>
+  entries: Array<{
+    response: RagSearchResponse;
+    alias: TitleAliasCandidate | null;
+  }>,
 ): RagSearchResponse {
   const resultsByKey = new Map<string, RagSearchResult>();
 
@@ -1396,20 +1176,34 @@ function mergeRagResponses(
     for (const result of entry.response.results) {
       const key = resultMergeKey(result);
       const aliasTitleScore = entry.alias
-        ? Math.max(...entry.alias.candidates.map((title) => titleSimilarityScore(title, result.title)), 0)
+        ? Math.max(
+            ...entry.alias.candidates.map((title) =>
+              titleSimilarityScore(title, result.title),
+            ),
+            0,
+          )
         : 0;
-      const aliasScore = aliasTitleScore >= 0.5 ? Math.max(aliasTitleScore, (entry.alias?.score ?? 0) * 0.92) : 0;
+      const aliasScore =
+        aliasTitleScore >= 0.5
+          ? Math.max(aliasTitleScore, (entry.alias?.score ?? 0) * 0.92)
+          : 0;
       const nextScore = Math.max(result.score ?? 0, aliasScore);
       const next: RagSearchResult = {
         ...result,
         score: nextScore || result.score,
-        title_candidates: mergeTitleCandidates(result.title_candidates, entry.alias?.candidates)
+        title_candidates: mergeTitleCandidates(
+          result.title_candidates,
+          entry.alias?.candidates,
+        ),
       };
       const existing = resultsByKey.get(key);
       if (!existing || (next.score ?? 0) > (existing.score ?? 0)) {
         resultsByKey.set(key, {
           ...next,
-          title_candidates: mergeTitleCandidates(existing?.title_candidates, next.title_candidates)
+          title_candidates: mergeTitleCandidates(
+            existing?.title_candidates,
+            next.title_candidates,
+          ),
         });
       }
     }
@@ -1421,24 +1215,29 @@ function mergeRagResponses(
 
   const firstResponse = entries[0]?.response;
   const first = results[0] ?? null;
-  const highlight =
-    first
-      ? buildFallbackHighlight(first, query)
-      : firstResponse?.highlight ?? null;
+  const highlight = first
+    ? buildFallbackHighlight(first, query)
+    : (firstResponse?.highlight ?? null);
 
   return {
     query,
     answer:
       results.length > 0
         ? `Found ${results.length} strong matches${entries.length > 1 ? " using title aliases." : "."}`
-        : firstResponse?.answer ?? "No Smart Search matches found.",
-    retrieval_mode: entries.length > 1 ? "hybrid_cache_title_alias" : firstResponse?.retrieval_mode ?? "hybrid_cache",
+        : (firstResponse?.answer ?? "No Smart Search matches found."),
+    retrieval_mode:
+      entries.length > 1
+        ? "hybrid_cache_title_alias"
+        : (firstResponse?.retrieval_mode ?? "hybrid_cache"),
     results,
-    highlight
+    highlight,
   };
 }
 
-function hasStrongPrimaryTitleMatch(query: string, response: RagSearchResponse): boolean {
+function hasStrongPrimaryTitleMatch(
+  query: string,
+  response: RagSearchResponse,
+): boolean {
   const first = response.results[0];
   if (!first) {
     return false;
@@ -1446,7 +1245,9 @@ function hasStrongPrimaryTitleMatch(query: string, response: RagSearchResponse):
 
   const titleScore = Math.max(
     titleSimilarityScore(query, first.title),
-    ...(first.title_candidates ?? []).map((title) => titleSimilarityScore(query, title))
+    ...(first.title_candidates ?? []).map((title) =>
+      titleSimilarityScore(query, title),
+    ),
   );
   if (titleScore >= 0.96) {
     return true;
@@ -1457,7 +1258,7 @@ function hasStrongPrimaryTitleMatch(query: string, response: RagSearchResponse):
 
 export async function searchMangaRag(
   query: string,
-  options: RagSearchOptions = {}
+  options: RagSearchOptions = {},
 ): Promise<RagSearchResponse> {
   const normalized = cleanText(query);
   if (!normalized) {
@@ -1465,47 +1266,54 @@ export async function searchMangaRag(
   }
 
   const parsedFilter = parseAppendedMediaTypeFilter(normalized);
-  const mediaTypeFilter = options.mediaTypeFilter ?? parsedFilter.mediaTypeFilter;
-  const searchQuery = parsedFilter.mediaTypeFilter ? parsedFilter.query : normalized;
+  const mediaTypeFilter =
+    options.mediaTypeFilter ?? parsedFilter.mediaTypeFilter;
+  const searchQuery = parsedFilter.mediaTypeFilter
+    ? parsedFilter.query
+    : normalized;
   const primary = filterRagResponseByMediaType(
     await searchMangaRagSingle(searchQuery, mediaTypeFilter),
     mediaTypeFilter,
-    normalized
+    normalized,
   );
   await options.onProgress?.({
     stage: "primary",
     query: normalized,
-    payload: primary
+    payload: primary,
   });
 
   if (hasStrongPrimaryTitleMatch(normalized, primary)) {
     await options.onProgress?.({
       stage: "final",
       query: normalized,
-      payload: primary
+      payload: primary,
     });
 
     return primary;
   }
 
-  const aliasSearches = buildTitleAliasSearches(searchQuery, await fetchMalTitleAliasCandidates(searchQuery));
+  const aliasSearches = buildTitleAliasSearches(
+    searchQuery,
+    await fetchMalTitleAliasCandidates(searchQuery),
+  );
   if (aliasSearches.length > 0) {
-    const entries: Array<{ response: RagSearchResponse; alias: TitleAliasCandidate | null }> = [
-      { response: primary, alias: null }
-    ];
+    const entries: Array<{
+      response: RagSearchResponse;
+      alias: TitleAliasCandidate | null;
+    }> = [{ response: primary, alias: null }];
 
     for (const aliasSearch of aliasSearches) {
       const aliasResponse = filterRagResponseByMediaType(
         await searchMangaRagSingle(aliasSearch.query, mediaTypeFilter),
         mediaTypeFilter,
-        normalized
+        normalized,
       );
       entries.push({ response: aliasResponse, alias: aliasSearch.alias });
 
       await options.onProgress?.({
         stage: "title_alias",
         query: normalized,
-        payload: mergeRagResponses(normalized, entries)
+        payload: mergeRagResponses(normalized, entries),
       });
     }
 
@@ -1513,7 +1321,7 @@ export async function searchMangaRag(
     await options.onProgress?.({
       stage: "final",
       query: normalized,
-      payload: merged
+      payload: merged,
     });
 
     return merged;
@@ -1522,56 +1330,8 @@ export async function searchMangaRag(
   await options.onProgress?.({
     stage: "final",
     query: normalized,
-    payload: primary
+    payload: primary,
   });
 
   return primary;
-}
-
-export async function fetchRagResultLiveMetadata(
-  malId: number,
-  fallbackTitle: string,
-  mediaHint: string | null | undefined
-): Promise<RagResultLiveMetadata | null> {
-  if (!Number.isFinite(malId) || malId <= 0) {
-    return null;
-  }
-
-  const preferredMediaType = parseMediaHint(mediaHint);
-  const normalizedTitle = cleanText(fallbackTitle) || "Unknown";
-  let enrichment: JikanEnrichment | null = null;
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    enrichment = await fetchJikanDetails(
-      malId,
-      normalizedTitle,
-      preferredMediaType,
-      false
-    );
-
-    if (enrichment) {
-      break;
-    }
-
-    if (attempt < 2) {
-      await delay(750 + attempt * 900);
-    }
-  }
-
-  if (!enrichment) {
-    return null;
-  }
-
-  return {
-    mal_id: malId,
-    media_type: enrichment.mediaType,
-    display_type: enrichment.typeLabel || enrichment.mediaType,
-    title: enrichment.title,
-    image_url: enrichment.imageUrl,
-    status: enrichment.status,
-    chapters: enrichment.chapters,
-    volumes: enrichment.volumes,
-    episodes: enrichment.episodes,
-    jikan_score: enrichment.score
-  };
 }

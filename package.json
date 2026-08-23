@@ -12,9 +12,11 @@
     "dev:frontend": "npm run dev --workspace @panelflow/frontend",
     "dev:rag": "node scripts/dev-rag.mjs",
     "build": "npm run build --workspace @panelflow/backend && npm run build --workspace @panelflow/frontend",
-    "typecheck": "npm run typecheck --workspace @panelflow/backend && npm run typecheck --workspace @panelflow/frontend"
+    "typecheck": "npm run typecheck --workspace @panelflow/backend && npm run typecheck --workspace @panelflow/frontend",
+    "bench": "node scripts/bench/run-load.mjs"
   },
   "devDependencies": {
+    "autocannon": "^7.15.0",
     "concurrently": "^9.0.1",
     "typescript": "^5.6.3"
   }

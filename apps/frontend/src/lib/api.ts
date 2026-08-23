@@ -5,7 +5,7 @@ import type {
   RagSearchPayload,
   SearchResult,
   SuggestionsPayload,
-  SupportedAdapter
+  SupportedAdapter,
 } from "../types";
 
 interface ErrorResponse {
@@ -25,71 +25,19 @@ export class ApiRequestError extends Error {
   }
 }
 
-type JikanMediaType = "anime" | "manga";
-
-interface JikanImageVariant {
-  image_url?: string | null;
-  large_image_url?: string | null;
-  small_image_url?: string | null;
-}
-
-interface JikanFullData {
-  mal_id?: number;
-  title?: string | null;
-  title_english?: string | null;
-  title_japanese?: string | null;
-  title_synonyms?: string[] | null;
-  type?: string | null;
-  status?: string | null;
-  chapters?: number | null;
-  volumes?: number | null;
-  episodes?: number | null;
-  score?: number | null;
-  images?: {
-    jpg?: JikanImageVariant;
-    webp?: JikanImageVariant;
-  };
-}
-
-interface JikanFullPayload {
-  data?: JikanFullData;
-}
-
-interface JikanSearchPayload {
-  data?: JikanFullData[];
-}
-
-interface JikanRecommendationEntry {
-  mal_id?: number;
-  title?: string | null;
-  url?: string | null;
-  images?: JikanFullData["images"];
-}
-
-interface JikanRecommendationRow {
-  entry?: JikanRecommendationEntry;
-  votes?: number | null;
-}
-
-interface JikanRecommendationsPayload {
-  data?: JikanRecommendationRow[];
-}
-
-const API_BASE_URL = cleanText(import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
-const JIKAN_BASE_URL = "https://api.jikan.moe/v4";
-const JIKAN_MAX_RETRIES = 2;
-const JIKAN_MIN_INTERVAL_MS = 1_100;
-const JIKAN_CACHE_TTL_MS = 15 * 60 * 1000;
-const JIKAN_RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
-const jikanFullCache = new Map<string, { expiresAt: number; value: JikanFullData | null }>();
-const jikanChapterCountCache = new Map<string, { expiresAt: number; value: number | null }>();
-const jikanRecommendationsCache = new Map<string, { expiresAt: number; value: SuggestionsPayload }>();
-let nextJikanRequestAt = 0;
-
+/**
+ * Metadata enrichment is served by the backend via /api/meta endpoints,
+ * backed by MAL API v2 (primary) and AniList GraphQL (fallback) with
+ * server-side caching. Jikan is no longer called browser-side; the outage
+ * event plumbing is kept temporarily so existing UI listeners keep working.
+ */
 export const JIKAN_OUTAGE_EVENT = "panelflow:jikan-outage";
 
 export function notifyJikanOutage(status: number | null, url = ""): void {
-  if ((status !== null && (status < 500 || status > 599)) || typeof window === "undefined") {
+  if (
+    (status !== null && (status < 500 || status > 599)) ||
+    typeof window === "undefined"
+  ) {
     return;
   }
 
@@ -97,15 +45,16 @@ export function notifyJikanOutage(status: number | null, url = ""): void {
     new CustomEvent(JIKAN_OUTAGE_EVENT, {
       detail: {
         status,
-        url
-      }
-    })
+        url,
+      },
+    }),
   );
 }
 
-function notifyJikanOutageResponse(response: Response): void {
-  notifyJikanOutage(response.status, response.url);
-}
+const API_BASE_URL = cleanText(import.meta.env.VITE_API_BASE_URL ?? "").replace(
+  /\/+$/,
+  "",
+);
 
 function apiPath(pathname: string): string {
   if (!pathname.startsWith("/")) {
@@ -116,11 +65,13 @@ function apiPath(pathname: string): string {
 
 async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const errorBody = (await response.json().catch(() => ({}))) as ErrorResponse;
+    const errorBody = (await response
+      .json()
+      .catch(() => ({}))) as ErrorResponse;
     throw new ApiRequestError(
       errorBody.error ?? `Request failed with status ${response.status}`,
       response.status,
-      errorBody.code
+      errorBody.code,
     );
   }
 
@@ -132,336 +83,12 @@ function cleanText(value: unknown): string {
     return "";
   }
 
-  return value
-    .replace(/\s+/g, " ")
-    .trim();
+  return value.replace(/\s+/g, " ").trim();
 }
 
-function safeNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function extractJikanImageUrl(images: JikanFullData["images"]): string | null {
-  const candidates: Array<string | null | undefined> = [
-    images?.jpg?.large_image_url,
-    images?.jpg?.image_url,
-    images?.jpg?.small_image_url,
-    images?.webp?.large_image_url,
-    images?.webp?.image_url,
-    images?.webp?.small_image_url
-  ];
-
-  for (const candidate of candidates) {
-    const value = cleanText(candidate);
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function normalizeMediaTypeHint(mediaType: string): JikanMediaType {
-  const normalized = mediaType.trim().toLowerCase();
-  if (normalized.includes("anime")) {
-    return "anime";
-  }
-  return "manga";
-}
-
-function mediaTypeOrder(hint: JikanMediaType): JikanMediaType[] {
-  return hint === "anime" ? ["anime", "manga"] : ["manga", "anime"];
-}
-
-function normalizeTitleForMatch(value: string): string {
-  return cleanText(value)
-    .toLowerCase()
-    .replace(/['’]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function stripChapterNoise(value: string): string {
-  return cleanText(value)
-    .replace(/^(?:chapter|chap|ch\.?|episode|ep\.?)\s*[-#: ]?\d+(?:\.\d+)?\s*[-–—:|]\s*/i, "")
-    .replace(/\s*[-–—:|]\s*(?:chapter|chap|ch\.?|episode|ep\.?)\s*[-#: ]?\d+(?:\.\d+)?.*$/i, "")
-    .replace(/\b(?:chapter|chap|ch\.?|episode|ep\.?)\s*[-#: ]?\d+(?:\.\d+)?.*$/i, "")
-    .trim();
-}
-
-function collectJikanTitleCandidates(data: JikanFullData): string[] {
-  return [
-    data.title,
-    data.title_english,
-    data.title_japanese,
-    ...(Array.isArray(data.title_synonyms) ? data.title_synonyms : [])
-  ]
-    .map((title) => cleanText(title))
-    .filter(Boolean);
-}
-
-function jikanTitleMatchesResult(data: JikanFullData, resultTitle: string): boolean {
-  const normalizedResult = normalizeTitleForMatch(resultTitle);
-  if (!normalizedResult) {
-    return true;
-  }
-
-  const resultTokens = normalizedResult.split(/\s+/).filter((token) => token.length >= 2);
-  for (const title of collectJikanTitleCandidates(data)) {
-    const normalizedTitle = normalizeTitleForMatch(title);
-    if (!normalizedTitle) {
-      continue;
-    }
-    if (normalizedTitle === normalizedResult || normalizedTitle.includes(normalizedResult) || normalizedResult.includes(normalizedTitle)) {
-      return true;
-    }
-
-    const titleTokens = normalizedTitle.split(/\s+/).filter((token) => token.length >= 2);
-    const matched = resultTokens.filter((token) => titleTokens.includes(token)).length;
-    if (resultTokens.length >= 2 && matched / resultTokens.length >= 0.75) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function scoreJikanMangaCandidate(candidate: JikanFullData, query: string): number {
-  const normalizedQuery = normalizeTitleForMatch(query);
-  if (!normalizedQuery) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  const queryTokens = normalizedQuery.split(/\s+/).filter((token) => token.length >= 2);
-  let best = Number.POSITIVE_INFINITY;
-
-  for (const title of collectJikanTitleCandidates(candidate)) {
-    const normalizedTitle = normalizeTitleForMatch(title);
-    if (!normalizedTitle) {
-      continue;
-    }
-
-    if (normalizedTitle === normalizedQuery) {
-      return 0;
-    }
-
-    if (normalizedTitle.startsWith(normalizedQuery) || normalizedQuery.startsWith(normalizedTitle)) {
-      best = Math.min(best, 1);
-      continue;
-    }
-
-    const titleTokens = normalizedTitle.split(/\s+/).filter((token) => token.length >= 2);
-    const matched = queryTokens.filter((token) => titleTokens.includes(token)).length;
-    if (matched > 0 && matched >= Math.min(queryTokens.length, titleTokens.length)) {
-      best = Math.min(best, 1.5);
-      continue;
-    }
-
-    if (normalizedTitle.includes(normalizedQuery) || normalizedQuery.includes(normalizedTitle)) {
-      best = Math.min(best, 2);
-    }
-  }
-
-  return best;
-}
-
-function buildJikanMangaQueries(options: {
-  seriesTitle: string;
-  chapterTitle?: string | null;
-  chapterUrl?: string;
-}): string[] {
-  const queries = new Set<string>();
-
-  for (const value of [options.seriesTitle, options.chapterTitle ?? ""]) {
-    const cleaned = stripChapterNoise(value);
-    if (cleaned) {
-      queries.add(cleaned);
-    }
-
-    const leading = cleaned.split(/[-–—:|([\\]/)[0]?.trim();
-    if (leading) {
-      queries.add(leading);
-    }
-  }
-
-  try {
-    const hostLabel = new URL(options.chapterUrl ?? "").hostname
-      .replace(/^www\./i, "")
-      .split(".")[0]
-      ?.replace(/[-_]+/g, " ")
-      .trim();
-    if (hostLabel && !/^(read|manga|manhwa|chapter|chapters)$/i.test(hostLabel)) {
-      queries.add(hostLabel);
-    }
-  } catch {
-    // URL-derived query is best effort only.
-  }
-
-  return Array.from(queries).filter((query) => query.length >= 2);
-}
-
-function computeRetryDelayMs(attempt: number, retryAfterHeader: string | null, status?: number): number {
-  if (retryAfterHeader) {
-    const retryAfterSeconds = Number.parseInt(retryAfterHeader, 10);
-    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
-      return Math.min(65_000, retryAfterSeconds * 1000);
-    }
-  }
-
-  const base = status === 429 ? 2_500 : 500;
-  const cap = status === 429 ? 20_000 : 8_000;
-  const exponential = Math.min(cap, base * 2 ** attempt);
-  const jitter = Math.floor(Math.random() * 250);
-  return exponential + jitter;
-}
-
-function cacheKey(mediaType: JikanMediaType, malId: number): string {
-  return `${mediaType}:${malId}`;
-}
-
-async function waitFor(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) {
-    throw new DOMException("Aborted", "AbortError");
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      if (signal) {
-        signal.removeEventListener("abort", onAbort);
-      }
-      resolve();
-    }, ms);
-
-    const onAbort = () => {
-      window.clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
-async function waitForJikanSlot(signal?: AbortSignal): Promise<void> {
-  const now = Date.now();
-  const waitMs = nextJikanRequestAt - now;
-  if (waitMs > 0) {
-    await waitFor(waitMs, signal);
-  }
-
-  nextJikanRequestAt = Date.now() + JIKAN_MIN_INTERVAL_MS;
-}
-
-async function fetchJikanFullByType(
-  mediaType: JikanMediaType,
-  malId: number,
-  signal?: AbortSignal
-): Promise<JikanFullData | null> {
-  const url = `${JIKAN_BASE_URL}/${mediaType}/${malId}/full`;
-  const key = cacheKey(mediaType, malId);
-  const cached = jikanFullCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
-
-  let lastError: Error | null = null;
-  for (let attempt = 0; attempt < JIKAN_MAX_RETRIES; attempt += 1) {
-    await waitForJikanSlot(signal);
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        signal,
-        cache: "no-store",
-        headers: {
-          Accept: "application/json"
-        }
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw error;
-      }
-
-      notifyJikanOutage(null, url);
-      lastError = error instanceof Error ? error : new Error(String(error));
-      if (attempt < JIKAN_MAX_RETRIES - 1) {
-        await waitFor(computeRetryDelayMs(attempt, null), signal);
-        continue;
-      }
-      throw lastError;
-    }
-
-    if (response.ok) {
-      const payload = (await response.json()) as JikanFullPayload;
-      const value = payload.data ?? null;
-      jikanFullCache.set(key, {
-        expiresAt: Date.now() + JIKAN_CACHE_TTL_MS,
-        value
-      });
-      return value;
-    }
-
-    if (response.status === 404) {
-      jikanFullCache.set(key, {
-        expiresAt: Date.now() + JIKAN_CACHE_TTL_MS,
-        value: null
-      });
-      return null;
-    }
-
-    notifyJikanOutageResponse(response);
-    const body = await response.text().catch(() => "");
-    lastError = new Error(`Jikan ${mediaType}/${malId}/full failed (${response.status}): ${body.slice(0, 180)}`);
-
-    if (!JIKAN_RETRYABLE_STATUS.has(response.status) || attempt >= JIKAN_MAX_RETRIES - 1) {
-      throw lastError;
-    }
-
-    const retryAfter = response.headers.get("retry-after");
-    const retryDelayMs = computeRetryDelayMs(attempt, retryAfter, response.status);
-    nextJikanRequestAt = Math.max(nextJikanRequestAt, Date.now() + retryDelayMs);
-    await waitFor(retryDelayMs, signal);
-  }
-
-  throw lastError ?? new Error(`Jikan ${mediaType}/${malId}/full failed.`);
-}
-
-async function fetchJikanMangaSearch(query: string, signal?: AbortSignal): Promise<JikanFullData[]> {
-  await waitForJikanSlot(signal);
-
-  const url = new URL(`${JIKAN_BASE_URL}/manga`);
-  url.searchParams.set("q", query);
-  url.searchParams.set("limit", "10");
-
-  let response: Response;
-  try {
-    response = await fetch(url.toString(), {
-      signal,
-      cache: "no-store",
-      headers: {
-        Accept: "application/json"
-      }
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw error;
-    }
-    notifyJikanOutage(null, url.toString());
-    return [];
-  }
-
-  if (!response.ok) {
-    notifyJikanOutageResponse(response);
-    if (JIKAN_RETRYABLE_STATUS.has(response.status)) {
-      const retryDelayMs = computeRetryDelayMs(0, response.headers.get("retry-after"), response.status);
-      nextJikanRequestAt = Math.max(nextJikanRequestAt, Date.now() + retryDelayMs);
-    }
-    return [];
-  }
-
-  const payload = (await response.json()) as JikanSearchPayload;
-  return Array.isArray(payload.data) ? payload.data : [];
-}
+// ---------------------------------------------------------------------------
+// Core API calls
+// ---------------------------------------------------------------------------
 
 export function relayImageUrl(url: string): string {
   return url;
@@ -471,9 +98,9 @@ export async function ingestChapter(url: string): Promise<IngestResponse> {
   const response = await fetch(apiPath("/api/ingest"), {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify({ url })
+    body: JSON.stringify({ url }),
   });
 
   return parseJson<IngestResponse>(response);
@@ -485,14 +112,17 @@ export async function fetchSupportedAdapters(): Promise<SupportedAdapter[]> {
   return body.adapters;
 }
 
-export async function searchManga(query: string, signal?: AbortSignal): Promise<SearchResult[]> {
-  const baseUrl = apiPath(`/api/search?q=${encodeURIComponent(query)}`);
+async function fetchWith304Bust(
+  pathWithQuery: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const baseUrl = apiPath(pathWithQuery);
   let response = await fetch(baseUrl, {
     signal,
     cache: "no-store",
     headers: {
-      "Cache-Control": "no-cache"
-    }
+      "Cache-Control": "no-cache",
+    },
   });
 
   if (response.status === 304) {
@@ -500,51 +130,52 @@ export async function searchManga(query: string, signal?: AbortSignal): Promise<
       signal,
       cache: "reload",
       headers: {
-        "Cache-Control": "no-cache"
-      }
+        "Cache-Control": "no-cache",
+      },
     });
   }
 
+  return response;
+}
+
+export async function searchManga(
+  query: string,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const response = await fetchWith304Bust(
+    `/api/search?q=${encodeURIComponent(query)}`,
+    signal,
+  );
   const body = await parseJson<{ results: SearchResult[] }>(response);
   return body.results;
 }
 
-export async function searchMangaRag(query: string, signal?: AbortSignal): Promise<RagSearchPayload> {
-  const baseUrl = apiPath(`/api/rag/search?q=${encodeURIComponent(query)}`);
-  let response = await fetch(baseUrl, {
+export async function searchMangaRag(
+  query: string,
+  signal?: AbortSignal,
+): Promise<RagSearchPayload> {
+  const response = await fetchWith304Bust(
+    `/api/rag/search?q=${encodeURIComponent(query)}`,
     signal,
-    cache: "no-store",
-    headers: {
-      "Cache-Control": "no-cache"
-    }
-  });
-
-  if (response.status === 304) {
-    response = await fetch(`${baseUrl}&_ts=${Date.now()}`, {
-      signal,
-      cache: "reload",
-      headers: {
-        "Cache-Control": "no-cache"
-      }
-    });
-  }
-
+  );
   return parseJson<RagSearchPayload>(response);
 }
 
 export async function searchMangaRagStream(
   query: string,
   onUpdate: (payload: RagSearchPayload) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<RagSearchPayload> {
-  const baseUrl = apiPath(`/api/rag/search/stream?q=${encodeURIComponent(query)}`);
+  const baseUrl = apiPath(
+    `/api/rag/search/stream?q=${encodeURIComponent(query)}`,
+  );
   const response = await fetch(baseUrl, {
     signal,
     cache: "no-store",
     headers: {
       "Cache-Control": "no-cache",
-      Accept: "application/x-ndjson"
-    }
+      Accept: "application/x-ndjson",
+    },
   });
 
   if (!response.ok) {
@@ -568,12 +199,18 @@ export async function searchMangaRagStream(
       return;
     }
 
-    const event = JSON.parse(trimmed) as {
+    let event: {
       type?: string;
       payload?: RagSearchPayload;
       error?: string;
       code?: string;
     };
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      // Skip malformed NDJSON lines instead of failing the whole stream.
+      return;
+    }
 
     if (event.type === "result" || event.type === "done") {
       if (event.payload) {
@@ -584,7 +221,11 @@ export async function searchMangaRagStream(
     }
 
     if (event.type === "error") {
-      throw new ApiRequestError(event.error ?? "Smart Search failed.", response.status, event.code);
+      throw new ApiRequestError(
+        event.error ?? "Smart Search failed.",
+        response.status,
+        event.code,
+      );
     }
   };
 
@@ -608,10 +249,63 @@ export async function searchMangaRagStream(
   }
 
   if (!latest) {
-    throw new ApiRequestError("Smart Search returned no results.", response.status);
+    throw new ApiRequestError(
+      "Smart Search returned no results.",
+      response.status,
+    );
   }
 
   return latest;
+}
+
+// ---------------------------------------------------------------------------
+// Metadata enrichment (backend /api/meta — MAL v2 primary, AniList fallback)
+// ---------------------------------------------------------------------------
+
+interface BackendMetaPayload {
+  mal_id: number | null;
+  media_type: string | null;
+  display_type: string | null;
+  title: string;
+  title_candidates: string[];
+  image_url: string | null;
+  status: string | null;
+  chapters: number | null;
+  volumes: number | null;
+  episodes: number | null;
+  score: number | null;
+  source: "mal" | "anilist" | null;
+}
+
+function safeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeMediaTypeHint(mediaType: string): "anime" | "manga" {
+  return mediaType.trim().toLowerCase().includes("anime") ? "anime" : "manga";
+}
+
+/**
+ * Builds a validated absolute API URL. Only http(s) requests to the
+ * configured API origin (or the current page origin) are allowed.
+ */
+function buildValidatedApiUrl(
+  pathname: string,
+  params: Record<string, string>,
+): string {
+  let url: URL;
+  try {
+    url = new URL(pathname, API_BASE_URL || window.location.origin);
+  } catch {
+    throw new Error("Invalid API URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Blocked non-http API request.");
+  }
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  return url.toString();
 }
 
 export async function fetchRagResultLiveMeta(
@@ -619,219 +313,125 @@ export async function fetchRagResultLiveMeta(
   title: string,
   mediaType: string,
   signal?: AbortSignal,
-  strictMediaType = false
+  _strictMediaType = false,
 ): Promise<RagResultLiveMetaPayload> {
-  const hint = normalizeMediaTypeHint(mediaType);
-  const candidateTypes = strictMediaType ? [hint] : mediaTypeOrder(hint);
-  let lastError: Error | null = null;
+  const url = buildValidatedApiUrl("/api/meta", {
+    type: normalizeMediaTypeHint(mediaType),
+    id: String(malId),
+    title,
+  });
+  // _strictMediaType only constrains preferred order on the backend;
+  // the hint type is passed as primary either way.
 
-  for (const candidateType of candidateTypes) {
-    try {
-      const data = await fetchJikanFullByType(candidateType, malId, signal);
-      if (!data) {
-        continue;
-      }
-      if (!jikanTitleMatchesResult(data, title)) {
-        continue;
-      }
+  const response = await fetch(url, {
+    signal,
+    cache: "default",
+  });
 
-      const displayType = cleanText(data.type) || candidateType;
-      const normalizedTitle =
-        cleanText(data.title_english) ||
-        cleanText(data.title) ||
-        cleanText(data.title_japanese) ||
-        cleanText(title) ||
-        "Unknown";
-
-      return {
-        mal_id: safeNumber(data.mal_id) ?? malId,
-        media_type: candidateType,
-        display_type: displayType,
-        title: normalizedTitle,
-        title_candidates: collectJikanTitleCandidates(data),
-        image_url: extractJikanImageUrl(data.images),
-        status: cleanText(data.status) || null,
-        chapters: safeNumber(data.chapters),
-        volumes: safeNumber(data.volumes),
-        episodes: safeNumber(data.episodes),
-        jikan_score: safeNumber(data.score)
-      };
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw error;
-      }
-      lastError = error instanceof Error ? error : new Error(String(error));
-    }
+  if (!response.ok) {
+    throw new ApiRequestError(
+      `Metadata lookup failed for MAL-ID ${malId} (${response.status}).`,
+      response.status,
+      "META_UNAVAILABLE",
+    );
   }
 
-  throw lastError ?? new Error(`No Jikan metadata found for MAL-ID ${malId}.`);
+  const data = (await response.json()) as BackendMetaPayload | null;
+  if (!data || !data.title || data.title === "Unknown") {
+    throw new ApiRequestError(
+      `No metadata found for MAL-ID ${malId}.`,
+      404,
+      "META_NOT_FOUND",
+    );
+  }
+
+  return {
+    mal_id: safeNumber(data.mal_id) ?? malId,
+    media_type: cleanText(data.media_type) || normalizeMediaTypeHint(mediaType),
+    display_type:
+      cleanText(data.display_type) ||
+      cleanText(data.media_type) ||
+      normalizeMediaTypeHint(mediaType),
+    title: cleanText(data.title),
+    title_candidates: Array.isArray(data.title_candidates)
+      ? data.title_candidates.filter(Boolean)
+      : [],
+    image_url: cleanText(data.image_url) || null,
+    status: cleanText(data.status) || null,
+    chapters: safeNumber(data.chapters),
+    volumes: safeNumber(data.volumes),
+    episodes: safeNumber(data.episodes),
+    jikan_score: safeNumber(data.score),
+  };
 }
 
+/** Kept for call-site compatibility; now backed by /api/meta/chapter-count. */
 export async function fetchJikanMangaChapterCount(
   options: {
     seriesTitle: string;
     chapterTitle?: string | null;
     chapterUrl?: string;
   },
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<number | null> {
-  const queries = buildJikanMangaQueries(options);
-  const cacheKey = queries.map((query) => normalizeTitleForMatch(query)).join("|");
-  const cached = jikanChapterCountCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
-
-  let best: { data: JikanFullData; score: number } | null = null;
-
-  for (const query of queries) {
-    const candidates = await fetchJikanMangaSearch(query, signal);
-    for (const candidate of candidates) {
-      const score = scoreJikanMangaCandidate(candidate, query);
-      if (!Number.isFinite(score) || score > 2.5) {
-        continue;
-      }
-
-      if (
-        !best ||
-        score < best.score ||
-        (score === best.score && (safeNumber(candidate.chapters) ?? 0) > (safeNumber(best.data.chapters) ?? 0))
-      ) {
-        best = { data: candidate, score };
-      }
-    }
-
-    if (best?.score === 0 && safeNumber(best.data.chapters)) {
-      break;
-    }
-  }
-
-  let chapterCount = best ? safeNumber(best.data.chapters) : null;
-  const malId = best ? safeNumber(best.data.mal_id) : null;
-  if ((!chapterCount || chapterCount <= 0) && malId !== null) {
-    const full = await fetchJikanFullByType("manga", malId, signal);
-    chapterCount = full ? safeNumber(full.chapters) : null;
-  }
-
-  const normalizedCount =
-    chapterCount !== null && chapterCount > 0 ? Math.min(Math.floor(chapterCount), 1500) : null;
-  if (cacheKey) {
-    jikanChapterCountCache.set(cacheKey, {
-      expiresAt: Date.now() + JIKAN_CACHE_TTL_MS,
-      value: normalizedCount
-    });
-  }
-
-  return normalizedCount;
-}
-
-async function resolveJikanMangaIdByTitle(seriesTitle: string, signal?: AbortSignal): Promise<number | null> {
-  const queries = buildJikanMangaQueries({ seriesTitle });
-  let best: { data: JikanFullData; score: number } | null = null;
-
-  for (const query of queries) {
-    const candidates = await fetchJikanMangaSearch(query, signal);
-    for (const candidate of candidates) {
-      const score = scoreJikanMangaCandidate(candidate, query);
-      if (!Number.isFinite(score) || score > 2.5) {
-        continue;
-      }
-
-      if (!best || score < best.score) {
-        best = { data: candidate, score };
-      }
-    }
-
-    if (best?.score === 0) {
-      break;
-    }
-  }
-
-  return best ? safeNumber(best.data.mal_id) : null;
-}
-
-export async function fetchJikanMangaRecommendations(
-  seriesTitle: string,
-  signal?: AbortSignal
-): Promise<SuggestionsPayload> {
-  const normalizedTitle = normalizeTitleForMatch(seriesTitle);
-  const cached = jikanRecommendationsCache.get(normalizedTitle);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
-
-  const malId = await resolveJikanMangaIdByTitle(seriesTitle, signal);
-  if (malId === null) {
-    const empty = { alternatives: [], similarSeries: [], trending: [] };
-    jikanRecommendationsCache.set(normalizedTitle, {
-      expiresAt: Date.now() + JIKAN_CACHE_TTL_MS,
-      value: empty
-    });
-    return empty;
-  }
-
-  await waitForJikanSlot(signal);
-  const recommendationsUrl = `${JIKAN_BASE_URL}/manga/${malId}/recommendations`;
-  let response: Response;
   try {
-    response = await fetch(recommendationsUrl, {
-      signal,
-      cache: "no-store",
-      headers: {
-        Accept: "application/json"
-      }
+    const chapterCountUrl = buildValidatedApiUrl("/api/meta/chapter-count", {
+      title: options.seriesTitle,
+      ...(options.chapterTitle?.trim()
+        ? { chapterTitle: options.chapterTitle.trim() }
+        : {}),
+      ...(options.chapterUrl?.trim() ? { url: options.chapterUrl.trim() } : {}),
     });
+    const body = await parseJson<{ chapters: number | null }>(
+      await fetch(chapterCountUrl, {
+        signal,
+        cache: "default",
+      }),
+    );
+    const count = safeNumber(body.chapters);
+    return count !== null && count > 0
+      ? Math.min(Math.floor(count), 1500)
+      : null;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
     }
-    notifyJikanOutage(null, recommendationsUrl);
-    throw (error instanceof Error ? error : new Error(String(error)));
+    return null;
   }
+}
+
+/** Kept for call-site compatibility; now backed by /api/meta/recommendations. */
+export async function fetchJikanMangaRecommendations(
+  seriesTitle: string,
+  signal?: AbortSignal,
+): Promise<SuggestionsPayload> {
+  const recommendationsUrl = buildValidatedApiUrl("/api/meta/recommendations", {
+    title: seriesTitle,
+  });
+  const response = await fetch(recommendationsUrl, {
+    signal,
+    cache: "default",
+  });
 
   if (!response.ok) {
-    notifyJikanOutageResponse(response);
-    if (JIKAN_RETRYABLE_STATUS.has(response.status)) {
-      const retryDelayMs = computeRetryDelayMs(0, response.headers.get("retry-after"), response.status);
-      nextJikanRequestAt = Math.max(nextJikanRequestAt, Date.now() + retryDelayMs);
-    }
-    throw new Error(`Jikan manga/${malId}/recommendations failed (${response.status}).`);
+    throw new Error(`Recommendations lookup failed (${response.status}).`);
   }
 
-  const payload = (await response.json()) as JikanRecommendationsPayload;
-  const seen = new Set<string>();
-  const similarSeries = (Array.isArray(payload.data) ? payload.data : [])
-    .map((row) => {
-      const title = cleanText(row.entry?.title);
-      const key = normalizeTitleForMatch(title);
-      if (!title || !key || seen.has(key)) {
-        return null;
-      }
-      seen.add(key);
-      return {
-        title,
-        coverUrl: extractJikanImageUrl(row.entry?.images),
-        chapterCount: 0,
-        votes: safeNumber(row.votes) ?? undefined,
-        malId: safeNumber(row.entry?.mal_id) ?? undefined,
-        url: cleanText(row.entry?.url) || undefined
-      };
-    })
-    .filter((row): row is NonNullable<typeof row> => Boolean(row))
-    .slice(0, 5);
-
-  const result: SuggestionsPayload = {
-    alternatives: [],
-    similarSeries,
-    trending: []
+  const payload = (await response.json()) as SuggestionsPayload;
+  return {
+    alternatives: Array.isArray(payload.alternatives)
+      ? payload.alternatives
+      : [],
+    similarSeries: Array.isArray(payload.similarSeries)
+      ? payload.similarSeries
+      : [],
+    trending: Array.isArray(payload.trending) ? payload.trending : [],
   };
-
-  jikanRecommendationsCache.set(normalizedTitle, {
-    expiresAt: Date.now() + JIKAN_CACHE_TTL_MS,
-    value: result
-  });
-  return result;
 }
+
+// ---------------------------------------------------------------------------
+// Reader + suggestions
+// ---------------------------------------------------------------------------
 
 function isLatinReadableTitle(value: string): boolean {
   const cleaned = cleanText(value);
@@ -848,9 +448,11 @@ export async function resolveReadNowByTitle(
   title: string,
   titleCandidates: string[] = [],
   signal?: AbortSignal,
-  mediaType?: string
+  mediaType?: string,
 ): Promise<ReadNowPayload> {
-  const latinCandidates = [title, ...titleCandidates].filter(isLatinReadableTitle);
+  const latinCandidates = [title, ...titleCandidates].filter(
+    isLatinReadableTitle,
+  );
   const params = new URLSearchParams({ title: latinCandidates[0] ?? title });
   if (latinCandidates.length > 0) {
     params.set("titles", JSON.stringify(latinCandidates));
@@ -858,43 +460,29 @@ export async function resolveReadNowByTitle(
   if (mediaType?.trim()) {
     params.set("media_type", mediaType.trim());
   }
-  const baseUrl = apiPath(`/api/read-now?${params.toString()}`);
-  let response = await fetch(baseUrl, {
+
+  const response = await fetchWith304Bust(
+    `/api/read-now?${params.toString()}`,
     signal,
-    cache: "no-store",
-    headers: {
-      "Cache-Control": "no-cache"
-    }
-  });
-
-  if (response.status === 304) {
-    response = await fetch(`${baseUrl}&_ts=${Date.now()}`, {
-      signal,
-      cache: "reload",
-      headers: {
-        "Cache-Control": "no-cache"
-      }
-    });
-  }
-
+  );
   return parseJson<ReadNowPayload>(response);
 }
 
 export async function fetchSuggestions(
   seriesTitle: string,
   genres: string[],
-  currentAdapter: string
+  currentAdapter: string,
 ): Promise<SuggestionsPayload> {
   const response = await fetch(apiPath("/api/suggestions"), {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       seriesTitle,
       genres,
-      currentAdapter
-    })
+      currentAdapter,
+    }),
   });
 
   return parseJson<SuggestionsPayload>(response);

@@ -2,8 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>RAGnarok Reader 🌀 | AI Manga & Anime Discovery + Universal Manga Reader</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>
+      RAGnarok Reader 🌀 | AI Manga & Anime Discovery + Universal Manga Reader
+    </title>
     <meta
       name="description"
       content="RAGnarok Reader is an AI-powered manga and anime discovery app with hybrid semantic + keyword search, character-aware matching, and a universal chapter reader."
@@ -12,12 +17,23 @@
       name="keywords"
       content="manga reader, manhwa reader, anime discovery, ai manga search, character search anime, hybrid search, semantic search manga, rag manga app, universal manga reader"
     />
-    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+    <meta
+      name="robots"
+      content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"
+    />
     <meta name="theme-color" content="#000000" />
     <meta name="application-name" content="RAGnarok Reader" />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="canonical" id="canonical-link" href="/" />
+
+    <!-- Warm up origins that dominate page weight before they are needed:
+         the backend API (metadata/search) and common manga image CDNs. -->
+    <link rel="preconnect" href="https://api.myanimelist.net" crossorigin />
+    <link rel="preconnect" href="https://graphql.anilist.co" crossorigin />
+    <link rel="dns-prefetch" href="https://cdn.myanimelist.net" />
+    <link rel="dns-prefetch" href="https://s4.anilist.co" />
+    <link rel="dns-prefetch" href="https://weebcentral.com" />
 
     <meta property="og:type" content="website" />
     <meta property="og:title" content="RAGnarok Reader 🌀" />

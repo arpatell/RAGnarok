@@ -1,19 +1,15 @@
+# Runtime dependencies for the RAG search service (rag/rag_api.py).
+# Intentionally slim for the 1 GB e2-micro deployment target:
+# no torch / sentence-transformers / pandas / pyarrow / langgraph.
+# Ingestion-only heavy deps live in requirements-ingestion.txt.
+
 fastapi==0.115.7
-huggingface-hub==0.33.0
+uvicorn==0.34.0
 httpx==0.28.1
-langchain==0.3.20
-langchain-community==0.3.17
-langchain-cerebras==0.5.0
-langchain-huggingface==0.1.2
-langchain-pinecone==0.2.3
-langchain-text-splitters==0.3.6
-langgraph==0.2.70
-pandas==2.2.3
-pinecone==5.4.2
-pinecone-text==0.10.0
-pyarrow==20.0.0
 pydantic==2.10.6
 python-dotenv==1.0.1
-sentence-transformers==3.4.1
-tqdm==4.67.1
-uvicorn==0.34.0
+pinecone==5.4.2
+pinecone-text==0.10.0
+fastembed>=0.8.0
+# Optional: only needed when RAG_LLM_RERANK_ENABLED=1 (imported lazily).
+langchain-cerebras==0.5.0

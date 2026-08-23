@@ -1,0 +1,18 @@
+# Heavy dependencies used only by offline ingestion / repair scripts
+# (top_4000_ingestion.py, top_4000_character_upsert.py,
+# repair_sparse_and_aliases.py, rag/service/rag_agent.py).
+# Not needed on the serving VM; install with:
+#   pip install -r requirements.txt -r requirements-ingestion.txt
+
+-r requirements.txt
+sentence-transformers==3.4.1
+huggingface-hub==0.33.0
+langchain==0.3.20
+langchain-community==0.3.17
+langchain-huggingface==0.1.2
+langchain-pinecone==0.2.3
+langchain-text-splitters==0.3.6
+langgraph==0.2.70
+pandas==2.2.3
+pyarrow==20.0.0
+tqdm==4.67.1

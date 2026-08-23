@@ -8,6 +8,11 @@ import { LRUCache } from "lru-cache";
 import { z } from "zod";
 import { listSupportedAdapters } from "./adapters/index.js";
 import { isIngestError, IngestError, toErrorPayload } from "./errors.js";
+import {
+  fetchMediaMeta,
+  resolveChapterCount,
+  resolveRecommendations,
+} from "./services/metadata.js";
 import { ingestUrl } from "./services/ingest.js";
 import { searchMangaRag } from "./services/ragProxy.js";
 import { buildSuggestions } from "./services/suggestions.js";
@@ -18,7 +23,7 @@ function loadEnvironment(): void {
   const candidates = [
     path.resolve(cwd, ".env"),
     path.resolve(cwd, "..", ".env"),
-    path.resolve(cwd, "..", "..", ".env")
+    path.resolve(cwd, "..", "..", ".env"),
   ];
 
   for (const envPath of candidates) {
@@ -38,7 +43,9 @@ const corsAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
   .map((origin) => origin.trim())
   .filter((origin) => origin.length > 0);
 const MAX_IMAGE_FETCH_CONCURRENCY = 6;
-const IMAGE_RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 522, 524]);
+const IMAGE_RETRYABLE_STATUS = new Set([
+  408, 425, 429, 500, 502, 503, 504, 520, 522, 524,
+]);
 
 interface CachedImage {
   body: Buffer;
@@ -48,7 +55,7 @@ interface CachedImage {
 const imageResponseCache = new LRUCache<string, CachedImage>({
   maxSize: 64 * 1024 * 1024,
   sizeCalculation: (value) => value.body.byteLength,
-  ttl: 10 * 60 * 1000
+  ttl: 10 * 60 * 1000,
 });
 
 const inFlightImageFetches = new Map<string, Promise<CachedImage>>();
@@ -59,7 +66,10 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function computeRetryDelayMs(attempt: number, retryAfterHeader: string | null): number {
+function computeRetryDelayMs(
+  attempt: number,
+  retryAfterHeader: string | null,
+): number {
   if (retryAfterHeader) {
     const seconds = Number.parseInt(retryAfterHeader, 10);
     if (Number.isFinite(seconds) && seconds > 0) {
@@ -72,7 +82,9 @@ function computeRetryDelayMs(attempt: number, retryAfterHeader: string | null): 
   return exponential + jitter;
 }
 
-async function withImageConcurrencySlot<T>(operation: () => Promise<T>): Promise<T> {
+async function withImageConcurrencySlot<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
   if (activeImageFetches >= MAX_IMAGE_FETCH_CONCURRENCY) {
     await new Promise<void>((resolve) => {
       pendingImageFetchWaiters.push(resolve);
@@ -114,15 +126,15 @@ async function fetchImageWithRetry(imageUrl: URL): Promise<CachedImage> {
           Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
           "Cache-Control": "no-cache",
           "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        }
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        },
       });
 
       if (response.ok) {
         const body = Buffer.from(await response.arrayBuffer());
         const image: CachedImage = {
           body,
-          contentType: response.headers.get("content-type") ?? "image/jpeg"
+          contentType: response.headers.get("content-type") ?? "image/jpeg",
         };
 
         imageResponseCache.set(key, image);
@@ -132,14 +144,25 @@ async function fetchImageWithRetry(imageUrl: URL): Promise<CachedImage> {
       lastStatus = response.status;
 
       if (!IMAGE_RETRYABLE_STATUS.has(response.status)) {
-        throw new IngestError("INGEST_FAILED", `Source image returned ${response.status}.`, response.status);
+        throw new IngestError(
+          "INGEST_FAILED",
+          `Source image returned ${response.status}.`,
+          response.status,
+        );
       }
 
-      const retryDelayMs = computeRetryDelayMs(attempt, response.headers.get("retry-after"));
+      const retryDelayMs = computeRetryDelayMs(
+        attempt,
+        response.headers.get("retry-after"),
+      );
       await delay(retryDelayMs);
     }
 
-    throw new IngestError("INGEST_FAILED", `Source image returned ${lastStatus}.`, lastStatus);
+    throw new IngestError(
+      "INGEST_FAILED",
+      `Source image returned ${lastStatus}.`,
+      lastStatus,
+    );
   });
 
   inFlightImageFetches.set(key, fetchPromise);
@@ -163,9 +186,9 @@ app.use(
               return;
             }
             callback(null, corsAllowedOrigins.includes(origin));
-          }
-        }
-  )
+          },
+        },
+  ),
 );
 app.use(express.json({ limit: "1mb" }));
 app.set("etag", false);
@@ -200,9 +223,10 @@ const ingestLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: "Rate limit exceeded. Please wait before requesting another chapter.",
-    code: "RATE_LIMIT"
-  }
+    error:
+      "Rate limit exceeded. Please wait before requesting another chapter.",
+    code: "RATE_LIMIT",
+  },
 });
 
 const imageLimiter = rateLimit({
@@ -212,8 +236,8 @@ const imageLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     error: "Too many image relay requests. Please wait briefly.",
-    code: "RATE_LIMIT"
-  }
+    code: "RATE_LIMIT",
+  },
 });
 
 const searchLimiter = rateLimit({
@@ -223,20 +247,20 @@ const searchLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     error: "Too many search requests. Please wait before searching again.",
-    code: "RATE_LIMIT"
-  }
+    code: "RATE_LIMIT",
+  },
 });
 
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    now: new Date().toISOString()
+    now: new Date().toISOString(),
   });
 });
 
 app.get("/adapters", (_req, res) => {
   res.json({
-    adapters: listSupportedAdapters()
+    adapters: listSupportedAdapters(),
   });
 });
 
@@ -244,7 +268,7 @@ app.post("/api/ingest", ingestLimiter, async (req, res, next) => {
   try {
     const payload = z
       .object({
-        url: z.string().min(1)
+        url: z.string().min(1),
       })
       .parse(req.body);
 
@@ -255,7 +279,7 @@ app.post("/api/ingest", ingestLimiter, async (req, res, next) => {
       const host = new URL(targetUrl).hostname;
       // eslint-disable-next-line no-console
       console.log(
-        `[ingest] ok host=${host} adapter=${result.sourceAdapter} source=${result.extractionSource ?? "unknown"} panels=${result.chapter.totalPages}`
+        `[ingest] ok host=${host} adapter=${result.sourceAdapter} source=${result.extractionSource ?? "unknown"} panels=${result.chapter.totalPages}`,
       );
     } catch {
       // Ignore malformed URL logging failures because URL is validated upstream.
@@ -273,7 +297,11 @@ app.get("/api/image", imageLimiter, async (req, res, next) => {
     const imageUrl = new URL(rawUrl);
 
     if (!["http:", "https:"].includes(imageUrl.protocol)) {
-      throw new IngestError("INVALID_URL", "Only http(s) images can be proxied.", 400);
+      throw new IngestError(
+        "INVALID_URL",
+        "Only http(s) images can be proxied.",
+        400,
+      );
     }
 
     const image = await fetchImageWithRetry(imageUrl);
@@ -292,7 +320,7 @@ app.get("/api/search", searchLimiter, async (req, res, next) => {
     // Hard outer cap — prevents the connection from hanging if search runs over budget
     const results = await Promise.race([
       searchManga(q),
-      new Promise<[]>((resolve) => setTimeout(() => resolve([]), 45_000))
+      new Promise<[]>((resolve) => setTimeout(() => resolve([]), 45_000)),
     ]);
     res.json({ results });
   } catch (error) {
@@ -303,7 +331,8 @@ app.get("/api/search", searchLimiter, async (req, res, next) => {
 app.get("/api/read-now", searchLimiter, async (req, res, next) => {
   try {
     const title = z.string().min(1).max(220).parse(req.query.title).trim();
-    const rawTitles = typeof req.query.titles === "string" ? req.query.titles : "";
+    const rawTitles =
+      typeof req.query.titles === "string" ? req.query.titles : "";
     const titleCandidates = (() => {
       if (!rawTitles) {
         return [title];
@@ -312,7 +341,12 @@ app.get("/api/read-now", searchLimiter, async (req, res, next) => {
       try {
         const parsed = JSON.parse(rawTitles) as unknown;
         if (Array.isArray(parsed)) {
-          return [title, ...parsed.filter((value): value is string => typeof value === "string")];
+          return [
+            title,
+            ...parsed.filter(
+              (value): value is string => typeof value === "string",
+            ),
+          ];
         }
       } catch {
         // Fall back to the primary title when optional candidates are malformed.
@@ -321,14 +355,17 @@ app.get("/api/read-now", searchLimiter, async (req, res, next) => {
       return [title];
     })();
 
-    const mediaHint = typeof req.query.media_type === "string" ? req.query.media_type : "";
+    const mediaHint =
+      typeof req.query.media_type === "string" ? req.query.media_type : "";
     const preferManhwa = /manhwa/i.test(mediaHint);
-    const resolved = await resolveDirectReadNow(titleCandidates, { preferManhwa });
+    const resolved = await resolveDirectReadNow(titleCandidates, {
+      preferManhwa,
+    });
     if (!resolved) {
       throw new IngestError(
         "INGEST_FAILED",
         `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching online for a dedicated website hosting this manga/manhwa and paste a chapter link into the Paste URL option above.`,
-        404
+        404,
       );
     }
     res.json(resolved);
@@ -340,7 +377,10 @@ app.get("/api/read-now", searchLimiter, async (req, res, next) => {
 app.get("/api/rag/search", searchLimiter, async (req, res, next) => {
   try {
     const q = z.string().min(1).max(400).parse(req.query.q);
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, proxy-revalidate",
+    );
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.setHeader("Surrogate-Control", "no-store");
@@ -362,7 +402,10 @@ app.get("/api/rag/search/stream", searchLimiter, async (req, res) => {
     const q = z.string().min(1).max(400).parse(req.query.q).trim();
     res.status(200);
     res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, proxy-revalidate",
+    );
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.setHeader("Surrogate-Control", "no-store");
@@ -375,13 +418,14 @@ app.get("/api/rag/search/stream", searchLimiter, async (req, res) => {
         }
         lastWriteAt = now;
         writeLine({ type: "result", ...progress });
-      }
+      },
     });
 
     writeLine({ type: "done", payload: result });
     res.end();
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Smart Search failed.";
+    const message =
+      error instanceof Error ? error.message : "Smart Search failed.";
     if (!res.headersSent) {
       res.status(500);
       res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
@@ -389,7 +433,7 @@ app.get("/api/rag/search/stream", searchLimiter, async (req, res) => {
     writeLine({
       type: "error",
       error: message,
-      code: isIngestError(error) ? error.code : "INGEST_FAILED"
+      code: isIngestError(error) ? error.code : "INGEST_FAILED",
     });
     res.end();
   }
@@ -401,7 +445,7 @@ app.post("/api/suggestions", ingestLimiter, (req, res, next) => {
       .object({
         seriesTitle: z.string().min(1),
         genres: z.array(z.string()).default([]),
-        currentAdapter: z.string().default("unknown")
+        currentAdapter: z.string().default("unknown"),
       })
       .parse(req.body);
 
@@ -412,39 +456,172 @@ app.post("/api/suggestions", ingestLimiter, (req, res, next) => {
   }
 });
 
-app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  const requestUrl = typeof req.body?.url === "string" ? req.body.url : "";
-
-  if (isIngestError(error)) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[ingest] error code=${error.code} status=${error.status} path=${req.path} url=${requestUrl} message=${error.message}`
-    );
-    res.status(error.status).json(toErrorPayload(error));
-    return;
-  }
-
-  if (error instanceof z.ZodError) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[api] bad-request path=${req.path} url=${requestUrl} issues=${error.issues.length}`
-    );
-    res.status(400).json({
-      error: "Invalid request payload.",
-      code: "BAD_REQUEST",
-      details: error.flatten()
-    });
-    return;
-  }
-
-  const message = error instanceof Error ? error.message : "Unexpected server error.";
-  // eslint-disable-next-line no-console
-  console.error(`[api] unexpected-error path=${req.path} url=${requestUrl} message=${message}`);
-  res.status(500).json({
-    error: message,
-    code: "INGEST_FAILED"
-  });
+const metaResponseCache = new LRUCache<string, { body: unknown }>({
+  max: 2048,
+  ttl: 30 * 60 * 1000,
 });
+
+function sendCachedMeta(
+  res: express.Response,
+  cacheKey: string,
+  produce: () => Promise<unknown>,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setImmediate(() => {
+      void (async () => {
+        try {
+          res.setHeader("Cache-Control", "public, max-age=3600");
+
+          const cached = metaResponseCache.get(cacheKey);
+          if (cached) {
+            res.json(cached.body);
+            return;
+          }
+
+          const body = await produce();
+          metaResponseCache.set(cacheKey, { body });
+          res.json(body);
+        } catch (error) {
+          if (!res.headersSent) {
+            res.status(502).json({
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Metadata lookup failed.",
+              code: "META_UNAVAILABLE",
+            });
+          } else {
+            res.end();
+          }
+        } finally {
+          resolve();
+        }
+      })();
+    });
+  });
+}
+
+const metaLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 240,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many metadata requests. Please wait briefly.",
+    code: "RATE_LIMIT",
+  },
+});
+
+app.get("/api/meta", metaLimiter, async (req, res, next) => {
+  try {
+    const payload = z
+      .object({
+        type: z.enum(["manga", "anime"]),
+        id: z.coerce.number().int().positive(),
+        title: z.string().max(300).optional(),
+      })
+      .parse(req.query);
+
+    await sendCachedMeta(
+      res,
+      `meta:${payload.type}:${payload.id}:${payload.title ?? ""}`,
+      () =>
+        fetchMediaMeta({
+          malId: payload.id,
+          fallbackTitle: payload.title,
+          preferredType: payload.type,
+          strictMediaType: false,
+        }),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/meta/chapter-count", metaLimiter, async (req, res, next) => {
+  try {
+    const payload = z
+      .object({
+        title: z.string().min(1).max(300),
+        chapterTitle: z.string().max(300).optional(),
+        url: z.string().url().max(2000).optional(),
+      })
+      .parse(req.query);
+
+    await sendCachedMeta(
+      res,
+      `chapters:${payload.title}:${payload.chapterTitle ?? ""}:${payload.url ?? ""}`,
+      () =>
+        resolveChapterCount({
+          seriesTitle: payload.title,
+          chapterTitle: payload.chapterTitle,
+          chapterUrl: payload.url,
+        }).then((count) => ({ chapters: count })),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/meta/recommendations", metaLimiter, async (req, res, next) => {
+  try {
+    const payload = z
+      .object({
+        title: z.string().min(1).max(300),
+      })
+      .parse(req.query);
+
+    await sendCachedMeta(res, `recs:${payload.title}`, () =>
+      resolveRecommendations(payload.title),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use(
+  (
+    error: unknown,
+    req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    const requestUrl = typeof req.body?.url === "string" ? req.body.url : "";
+
+    if (isIngestError(error)) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[ingest] error code=${error.code} status=${error.status} path=${req.path} url=${requestUrl} message=${error.message}`,
+      );
+      res.status(error.status).json(toErrorPayload(error));
+      return;
+    }
+
+    if (error instanceof z.ZodError) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[api] bad-request path=${req.path} url=${requestUrl} issues=${error.issues.length}`,
+      );
+      res.status(400).json({
+        error: "Invalid request payload.",
+        code: "BAD_REQUEST",
+        details: error.flatten(),
+      });
+      return;
+    }
+
+    const message =
+      error instanceof Error ? error.message : "Unexpected server error.";
+    // eslint-disable-next-line no-console
+    console.error(
+      `[api] unexpected-error path=${req.path} url=${requestUrl} message=${message}`,
+    );
+    res.status(500).json({
+      error: message,
+      code: "INGEST_FAILED",
+    });
+  },
+);
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console

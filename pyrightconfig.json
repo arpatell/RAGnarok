@@ -1,0 +1,9 @@
+{
+  "venvPath": "C:/Users/sysadmin/Downloads/manga",
+  "venv": ".venv",
+  "extraPaths": [
+    "C:/Users/sysadmin/Downloads/manga/.venv/Lib/site-packages"
+  ],
+  "include": ["rag", "apps"],
+  "exclude": ["**/node_modules", "**/__pycache__", ".venv"]
+}

@@ -7,12 +7,12 @@ const SEARCH_LIMIT = 10;
 
 const chapterCountCache = new LRUCache<string, number>({
   max: 250,
-  ttl: 30 * 60 * 1000
+  ttl: 30 * 60 * 1000,
 });
 
 const chapterCountMissCache = new LRUCache<string, true>({
   max: 250,
-  ttl: 30 * 60 * 1000
+  ttl: 30 * 60 * 1000,
 });
 
 interface MalSearchResult {
@@ -81,8 +81,11 @@ function collectMangaTitles(manga: MalSearchResult): string[] {
   return Array.from(titles);
 }
 
-function normalizeSearchResult(candidate: MalSearchResult | MalSearchEntry): MalSearchResult | null {
-  const node = (candidate as MalSearchEntry).node ?? (candidate as MalSearchResult);
+function normalizeSearchResult(
+  candidate: MalSearchResult | MalSearchEntry,
+): MalSearchResult | null {
+  const node =
+    (candidate as MalSearchEntry).node ?? (candidate as MalSearchResult);
   if (!node || typeof node !== "object") {
     return null;
   }
@@ -95,11 +98,14 @@ function normalizeSearchResult(candidate: MalSearchResult | MalSearchEntry): Mal
     id: node.id,
     title: typeof node.title === "string" ? node.title : null,
     alternative_titles: node.alternative_titles,
-    num_chapters: typeof node.num_chapters === "number" ? node.num_chapters : null
+    num_chapters:
+      typeof node.num_chapters === "number" ? node.num_chapters : null,
   };
 }
 
-function normalizeDetailsResult(payload: MalDetailsResponse | null): MalSearchResult | null {
+function normalizeDetailsResult(
+  payload: MalDetailsResponse | null,
+): MalSearchResult | null {
   if (!payload) {
     return null;
   }
@@ -113,7 +119,8 @@ function normalizeDetailsResult(payload: MalDetailsResponse | null): MalSearchRe
     id: raw.id,
     title: typeof raw.title === "string" ? raw.title : null,
     alternative_titles: raw.alternative_titles,
-    num_chapters: typeof raw.num_chapters === "number" ? raw.num_chapters : null
+    num_chapters:
+      typeof raw.num_chapters === "number" ? raw.num_chapters : null,
   };
 }
 
@@ -124,7 +131,9 @@ function scoreCandidate(manga: MalSearchResult, query: string): number {
   }
 
   const normalizedQuery = normalizeText(query);
-  const queryTokens = normalizedQuery.split(/\s+/).filter((token) => token.length >= 3);
+  const queryTokens = normalizedQuery
+    .split(/\s+/)
+    .filter((token) => token.length >= 3);
   let bestScore = Number.POSITIVE_INFINITY;
 
   for (const title of titles) {
@@ -138,9 +147,14 @@ function scoreCandidate(manga: MalSearchResult, query: string): number {
     }
 
     const titleTokens = title.split(/\s+/).filter((token) => token.length >= 3);
-    const tokenMatches = queryTokens.filter((token) => titleTokens.includes(token)).length;
+    const tokenMatches = queryTokens.filter((token) =>
+      titleTokens.includes(token),
+    ).length;
 
-    if (tokenMatches > 0 && tokenMatches >= Math.min(queryTokens.length, titleTokens.length)) {
+    if (
+      tokenMatches > 0 &&
+      tokenMatches >= Math.min(queryTokens.length, titleTokens.length)
+    ) {
       bestScore = Math.min(bestScore, 1.5);
       continue;
     }
@@ -194,18 +208,26 @@ function buildSearchQueries(seriesTitle: string): string[] {
 }
 
 function formatLikeTemplate(template: string, value: number): string {
-  const decimalPlaces = template.includes(".") ? (template.split(".")[1] ?? "").length : 0;
+  const decimalPlaces = template.includes(".")
+    ? (template.split(".")[1] ?? "").length
+    : 0;
   const sign = value < 0 ? "-" : "";
   const absolute = Math.abs(value);
 
-  let formatted = decimalPlaces > 0 ? absolute.toFixed(decimalPlaces) : String(Math.round(absolute));
+  let formatted =
+    decimalPlaces > 0
+      ? absolute.toFixed(decimalPlaces)
+      : String(Math.round(absolute));
 
   const integerTemplate = template.replace(/^-/, "").split(".")[0] ?? template;
   const leadingZeros = integerTemplate.match(/^0+/)?.[0].length ?? 0;
   if (leadingZeros > 0) {
     const [intPart, decimalPart] = formatted.split(".");
     const safeIntPart = intPart ?? "0";
-    const paddedInt = safeIntPart.padStart(Math.max(safeIntPart.length, leadingZeros + 1), "0");
+    const paddedInt = safeIntPart.padStart(
+      Math.max(safeIntPart.length, leadingZeros + 1),
+      "0",
+    );
     formatted = decimalPart ? `${paddedInt}.${decimalPart}` : paddedInt;
   }
 
@@ -222,8 +244,11 @@ function parseChapterNumber(value: string): string {
   return cleaned;
 }
 
-function findChapterToken(pathname: string): { start: number; end: number; raw: string } | null {
-  const keywordPattern = /(chapter|chap|ch|episode|ep|c)([-_ ]*)(\d+(?:\.\d+)?)/gi;
+function findChapterToken(
+  pathname: string,
+): { start: number; end: number; raw: string } | null {
+  const keywordPattern =
+    /(chapter|chap|ch|episode|ep|c)([-_ ]*)(\d+(?:\.\d+)?)/gi;
   let selected: { start: number; end: number; raw: string } | null = null;
 
   for (const match of pathname.matchAll(keywordPattern)) {
@@ -238,7 +263,7 @@ function findChapterToken(pathname: string): { start: number; end: number; raw: 
     selected = {
       start: numericStart,
       end: numericStart + numericRaw.length,
-      raw: numericRaw
+      raw: numericRaw,
     };
   }
 
@@ -257,14 +282,17 @@ function findChapterToken(pathname: string): { start: number; end: number; raw: 
     selected = {
       start: index,
       end: index + raw.length,
-      raw
+      raw,
     };
   }
 
   return selected;
 }
 
-function renderChapterUrlFromTemplate(chapterUrl: string, chapterNumber: string): string | null {
+function renderChapterUrlFromTemplate(
+  chapterUrl: string,
+  chapterNumber: string,
+): string | null {
   const cleanedNumber = cleanText(chapterNumber);
   if (!cleanedNumber) {
     return null;
@@ -294,7 +322,10 @@ function renderChapterUrlFromTemplate(chapterUrl: string, chapterNumber: string)
         const replacement = Number.isFinite(numeric)
           ? formatLikeTemplate(numericMatch[0] ?? "", numeric)
           : cleanedNumber;
-        parsed.searchParams.set(key, value.replace(numericMatch[0] ?? "", replacement));
+        parsed.searchParams.set(
+          key,
+          value.replace(numericMatch[0] ?? "", replacement),
+        );
         return parsed.toString();
       }
 
@@ -311,7 +342,7 @@ function renderChapterUrlFromTemplate(chapterUrl: string, chapterNumber: string)
 function renderChapterUrlFromPattern(
   chapterUrl: string,
   chapterUrlPattern: string | null | undefined,
-  chapterNumber: string
+  chapterNumber: string,
 ): string | null {
   const cleanedNumber = cleanText(chapterNumber);
   const pattern = cleanText(chapterUrlPattern);
@@ -319,7 +350,10 @@ function renderChapterUrlFromPattern(
     return null;
   }
 
-  const renderedPattern = pattern.replaceAll("{chapter}", encodeURIComponent(cleanedNumber));
+  const renderedPattern = pattern.replaceAll(
+    "{chapter}",
+    encodeURIComponent(cleanedNumber),
+  );
 
   try {
     return new URL(renderedPattern, chapterUrl).toString();
@@ -329,7 +363,9 @@ function renderChapterUrlFromPattern(
 }
 
 function getClientId(): string | null {
-  const value = cleanText(process.env.MAL_CLIENT_ID ?? process.env.MYANIMELIST_CLIENT_ID);
+  const value = cleanText(
+    process.env.MAL_CLIENT_ID ?? process.env.MYANIMELIST_CLIENT_ID,
+  );
   return value || null;
 }
 
@@ -347,8 +383,8 @@ async function fetchJson<T>(url: string): Promise<T | null> {
       signal: controller.signal,
       headers: {
         Accept: "application/json",
-        "X-MAL-CLIENT-ID": clientId
-      }
+        "X-MAL-CLIENT-ID": clientId,
+      },
     });
 
     if (!response.ok) {
@@ -363,7 +399,37 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
-async function resolveMALChapterCount(seriesTitle: string): Promise<number | null> {
+/**
+ * Public entry point used by the unified metadata provider.
+ * Accepts optional context fields so callers can pass richer hints later;
+ * current MAL resolution keys off the series title.
+ */
+export async function resolveMangaChapterCount(options: {
+  seriesTitle: string;
+  chapterTitle?: string | null;
+  chapterUrl?: string;
+}): Promise<number | null> {
+  return resolveMALChapterCount(cleanText(options.seriesTitle));
+}
+
+function buildMalApiUrl(
+  pathname: string,
+  params: Record<string, string>,
+): URL | null {
+  try {
+    const url = new URL(`${MAL_BASE_URL}${pathname}`);
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveMALChapterCount(
+  seriesTitle: string,
+): Promise<number | null> {
   const cacheKey = normalizeText(seriesTitle);
   const cached = chapterCountCache.get(cacheKey);
   if (cached !== undefined) {
@@ -382,10 +448,14 @@ async function resolveMALChapterCount(seriesTitle: string): Promise<number | nul
   const scoredCandidates: ScoredCandidate[] = [];
 
   for (const query of buildSearchQueries(seriesTitle)) {
-    const queryUrl = new URL(`${MAL_BASE_URL}/manga`);
-    queryUrl.searchParams.set("q", query);
-    queryUrl.searchParams.set("limit", String(SEARCH_LIMIT));
-    queryUrl.searchParams.set("fields", "id,title,alternative_titles,num_chapters");
+    const queryUrl = buildMalApiUrl("/manga", {
+      q: query,
+      limit: String(SEARCH_LIMIT),
+      fields: "id,title,alternative_titles,num_chapters",
+    });
+    if (!queryUrl) {
+      continue;
+    }
 
     const payload = await fetchJson<MalSearchResponse>(queryUrl.toString());
     const candidates = (payload?.data ?? [])
@@ -399,7 +469,7 @@ async function resolveMALChapterCount(seriesTitle: string): Promise<number | nul
     for (const manga of candidates) {
       scoredCandidates.push({
         manga,
-        score: scoreCandidate(manga, seriesTitle)
+        score: scoreCandidate(manga, seriesTitle),
       });
     }
   }
@@ -418,7 +488,9 @@ async function resolveMALChapterCount(seriesTitle: string): Promise<number | nul
   }
 
   const ranked = Array.from(dedupedById.values())
-    .filter((candidate) => Number.isFinite(candidate.score) && candidate.score <= 2.5)
+    .filter(
+      (candidate) => Number.isFinite(candidate.score) && candidate.score <= 2.5,
+    )
     .sort((a, b) => {
       if (a.score !== b.score) {
         return a.score - b.score;
@@ -447,13 +519,21 @@ async function resolveMALChapterCount(seriesTitle: string): Promise<number | nul
       return detailsCount;
     }
 
-    const detailsUrl = new URL(`${MAL_BASE_URL}/manga/${chosen.id}`);
-    detailsUrl.searchParams.set("fields", "id,title,alternative_titles,num_chapters");
-    const detailsPayload = await fetchJson<MalDetailsResponse>(detailsUrl.toString());
+    const detailsUrl = buildMalApiUrl(`/manga/${chosen.id}`, {
+      fields: "id,title,alternative_titles,num_chapters",
+    });
+    if (!detailsUrl) {
+      continue;
+    }
+    const detailsPayload = await fetchJson<MalDetailsResponse>(
+      detailsUrl.toString(),
+    );
     const details = normalizeDetailsResult(detailsPayload);
     const resolvedCountRaw = details?.num_chapters ?? null;
     const resolvedCount =
-      typeof resolvedCountRaw === "number" ? resolvedCountRaw : Number.parseInt(String(resolvedCountRaw), 10);
+      typeof resolvedCountRaw === "number"
+        ? resolvedCountRaw
+        : Number.parseInt(String(resolvedCountRaw), 10);
 
     if (Number.isFinite(resolvedCount) && resolvedCount > 0) {
       chapterCountCache.set(cacheKey, resolvedCount);
@@ -502,7 +582,11 @@ function buildChapterPlaceholders(options: {
     }
 
     const renderedUrl =
-      renderChapterUrlFromPattern(options.chapterUrl, options.chapterUrlPattern, String(chapterNumber)) ??
+      renderChapterUrlFromPattern(
+        options.chapterUrl,
+        options.chapterUrlPattern,
+        String(chapterNumber),
+      ) ??
       renderChapterUrlFromTemplate(options.chapterUrl, String(chapterNumber));
     if (!renderedUrl) {
       continue;
@@ -511,7 +595,7 @@ function buildChapterPlaceholders(options: {
     placeholders.push({
       number: String(chapterNumber),
       title: null,
-      url: renderedUrl
+      url: renderedUrl,
     });
   }
 
@@ -529,16 +613,19 @@ export async function buildMALChapterPlaceholders(options: {
     return [];
   }
 
-  const highestExisting = options.existingChapters.reduce((maximum, chapter) => {
-    const parsed = parseExistingChapterNumber(chapter.number);
-    return parsed !== null ? Math.max(maximum, parsed) : maximum;
-  }, 0);
+  const highestExisting = options.existingChapters.reduce(
+    (maximum, chapter) => {
+      const parsed = parseExistingChapterNumber(chapter.number);
+      return parsed !== null ? Math.max(maximum, parsed) : maximum;
+    },
+    0,
+  );
 
   const maxChapterNumber = Math.max(highestExisting, chapterCount);
   return buildChapterPlaceholders({
     chapterUrl: options.chapterUrl,
     chapterUrlPattern: options.chapterUrlPattern,
     existingChapters: options.existingChapters,
-    maxChapterNumber
+    maxChapterNumber,
   });
 }
