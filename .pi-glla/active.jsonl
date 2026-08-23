@@ -1,9 +1,0 @@
-{"type":"session_rebound","value":{"reason":"startup"},"at":"2026-08-23T04:23:04.823Z"}
-{"type":"session_waiting_for_load","value":{"reason":"startup"},"at":"2026-08-23T04:23:04.836Z"}
-{"type":"state","value":{"goal":null,"list":[],"loop":null,"mainModelRecovery":null,"lastModelRef":"openrouter/stealth/ox-alpha","lastCompactionAt":null,"supervisorPausedAt":null,"loadHoldAt":null},"at":"2026-08-23T04:25:11.472Z"}
-{"type":"session_rebound","value":{"reason":"startup"},"at":"2026-08-23T17:36:30.716Z"}
-{"type":"session_shutdown","value":{"reason":"quit"},"at":"2026-08-23T20:39:43.707Z"}
-{"type":"session_rebound","value":{"reason":"startup"},"at":"2026-08-23T20:41:40.019Z"}
-{"type":"model_switch","value":{"from":"openrouter/stealth/ox-alpha","to":"opencode/deepseek-v4-flash-free","reason":"manual","at":"2026-08-23T20:42:34.258Z","source":"set"},"at":"2026-08-23T20:42:34.258Z"}
-{"type":"state","value":{"goal":null,"list":[],"loop":null,"mainModelRecovery":null,"lastModelRef":"opencode/deepseek-v4-flash-free","lastCompactionAt":null,"supervisorPausedAt":null,"loadHoldAt":null},"at":"2026-08-23T20:42:34.259Z"}
-{"type":"session_shutdown","value":{"reason":"quit"},"at":"2026-08-23T20:42:57.704Z"}
