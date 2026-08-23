@@ -16,8 +16,18 @@ _mk_debug.html
 __pycache__/
 *.pyc
 .venv/
+.ruff_cache/
 .vercel/
 DEPLOYMENT.md
+
+# Local agent/tooling state
+.pi-glla/
+.agents/
+.codebase-index/
+
+# Local machine artifacts
+/gcloud
+install.cmd
 
 # Generated RAG data/results. Keep these locally; do not push to GitHub.
 rag/ingestion/*
@@ -27,6 +37,3 @@ rag/eval/*.log
 !rag/ingestion/README.md
 !rag/ingestion/bm25_values.json
 !rag/eval/golden_top4000_cases.json
-
-# Local deployment notes
-DEPLOYMENT.md
