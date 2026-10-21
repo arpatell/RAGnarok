@@ -61,6 +61,6 @@ test("deployment installs and checks FastEmbed using the service interpreter bef
   assert.ok(workflow.includes('PY="$DEPLOY_REPO_REAL_PATH/.venv/bin/python"'));
   const install = workflow.indexOf('"$PY" -m pip install --quiet -r rag/requirements.txt');
   const check = workflow.indexOf("from fastembed import TextEmbedding");
-  const restart = workflow.indexOf("sudo systemctl restart ragnarok-rag.service");
+  const restart = workflow.indexOf("sudo -n bash scripts/gcp/restart-services.sh");
   assert.ok(install >= 0 && install < check && check < restart);
 });

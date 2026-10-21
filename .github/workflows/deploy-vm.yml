@@ -21,7 +21,7 @@ jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       DEPLOY_HOST: ${{ secrets.GCP_SSH_HOST }}
       DEPLOY_USER: ${{ secrets.GCP_SSH_USER }}
@@ -87,47 +87,7 @@ jobs:
           "$PY" -m pip install --quiet -r rag/requirements.txt
           "$PY" -c 'import sys; from fastembed import TextEmbedding; import rag.rag_api; print("RAG runtime imports verified:", sys.executable)'
 
-          sudo systemctl restart ragnarok-rag.service
-
-          echo "Waiting for RAG 'application startup complete'..."
-          deadline=$((SECONDS + 480))
-          rag_ready=0
-          while [ "$SECONDS" -lt "$deadline" ]; do
-            if ! sudo systemctl is-active --quiet ragnarok-rag.service; then
-              echo "ragnarok-rag.service died during startup:"
-              sudo journalctl -u ragnarok-rag.service -n 80 --no-pager || true
-              exit 1
-            fi
-            if curl -fsS --max-time 5 http://127.0.0.1:8090/health 2>/dev/null \
-              | grep -q '"initialized":"true"'; then
-              rag_ready=1
-              break
-            fi
-            sleep 5
-          done
-          if [ "$rag_ready" != 1 ]; then
-            echo "Timed out waiting for RAG startup after 480s:"
-            sudo journalctl -u ragnarok-rag.service -n 80 --no-pager || true
-            exit 1
-          fi
-          echo "RAG is up; restarting backend..."
-          sudo systemctl restart ragnarok-backend.service
-
-          backend_deadline=$((SECONDS + 60))
-          backend_ready=0
-          while [ "$SECONDS" -lt "$backend_deadline" ]; do
-            if curl -fsS --max-time 5 http://127.0.0.1:8787/health 2>/dev/null; then
-              echo
-              backend_ready=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$backend_ready" != 1 ]; then
-            echo "Backend did not become healthy within 60s:"
-            sudo journalctl -u ragnarok-backend.service -n 50 --no-pager || true
-            exit 1
-          fi
+          sudo -n bash scripts/gcp/restart-services.sh
           EOF
           } | ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
             "IFS= read -r GROQ_KEY_BASE64
