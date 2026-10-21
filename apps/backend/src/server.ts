@@ -14,9 +14,11 @@ import {
   resolveRecommendations,
 } from "./services/metadata.js";
 import { ingestUrl } from "./services/ingest.js";
+import { fetchChapterHtml } from "./services/fetchProxy.js";
+import { fetchImageWithRetry } from "./services/imageProxy.js";
 import { searchMangaRag } from "./services/ragProxy.js";
 import { buildSuggestions } from "./services/suggestions.js";
-import { resolveDirectReadNow, searchManga } from "./services/webSearch.js";
+import { ReadNowUnavailableError, resolveDirectReadNow, searchManga } from "./services/webSearch.js";
 
 function loadEnvironment(): void {
   const cwd = process.cwd();
@@ -42,138 +44,6 @@ const corsAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
   .split(",")
   .map((origin) => origin.trim())
   .filter((origin) => origin.length > 0);
-const MAX_IMAGE_FETCH_CONCURRENCY = 6;
-const IMAGE_RETRYABLE_STATUS = new Set([
-  408, 425, 429, 500, 502, 503, 504, 520, 522, 524,
-]);
-
-interface CachedImage {
-  body: Buffer;
-  contentType: string;
-}
-
-const imageResponseCache = new LRUCache<string, CachedImage>({
-  maxSize: 64 * 1024 * 1024,
-  sizeCalculation: (value) => value.body.byteLength,
-  ttl: 10 * 60 * 1000,
-});
-
-const inFlightImageFetches = new Map<string, Promise<CachedImage>>();
-let activeImageFetches = 0;
-const pendingImageFetchWaiters: Array<() => void> = [];
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function computeRetryDelayMs(
-  attempt: number,
-  retryAfterHeader: string | null,
-): number {
-  if (retryAfterHeader) {
-    const seconds = Number.parseInt(retryAfterHeader, 10);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      return Math.min(seconds * 1000, 8_000);
-    }
-  }
-
-  const exponential = Math.min(8_000, 250 * 2 ** attempt);
-  const jitter = Math.floor(Math.random() * 200);
-  return exponential + jitter;
-}
-
-async function withImageConcurrencySlot<T>(
-  operation: () => Promise<T>,
-): Promise<T> {
-  if (activeImageFetches >= MAX_IMAGE_FETCH_CONCURRENCY) {
-    await new Promise<void>((resolve) => {
-      pendingImageFetchWaiters.push(resolve);
-    });
-  }
-
-  activeImageFetches += 1;
-
-  try {
-    return await operation();
-  } finally {
-    activeImageFetches = Math.max(0, activeImageFetches - 1);
-    const next = pendingImageFetchWaiters.shift();
-    if (next) {
-      next();
-    }
-  }
-}
-
-async function fetchImageWithRetry(imageUrl: URL): Promise<CachedImage> {
-  const key = imageUrl.toString();
-  const cached = imageResponseCache.get(key);
-  if (cached) {
-    return cached;
-  }
-
-  const inFlight = inFlightImageFetches.get(key);
-  if (inFlight) {
-    return inFlight;
-  }
-
-  const fetchPromise = withImageConcurrencySlot(async () => {
-    let lastStatus = 502;
-
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const response = await fetch(imageUrl.toString(), {
-        headers: {
-          Referer: imageUrl.origin,
-          Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-          "Cache-Control": "no-cache",
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        },
-      });
-
-      if (response.ok) {
-        const body = Buffer.from(await response.arrayBuffer());
-        const image: CachedImage = {
-          body,
-          contentType: response.headers.get("content-type") ?? "image/jpeg",
-        };
-
-        imageResponseCache.set(key, image);
-        return image;
-      }
-
-      lastStatus = response.status;
-
-      if (!IMAGE_RETRYABLE_STATUS.has(response.status)) {
-        throw new IngestError(
-          "INGEST_FAILED",
-          `Source image returned ${response.status}.`,
-          response.status,
-        );
-      }
-
-      const retryDelayMs = computeRetryDelayMs(
-        attempt,
-        response.headers.get("retry-after"),
-      );
-      await delay(retryDelayMs);
-    }
-
-    throw new IngestError(
-      "INGEST_FAILED",
-      `Source image returned ${lastStatus}.`,
-      lastStatus,
-    );
-  });
-
-  inFlightImageFetches.set(key, fetchPromise);
-
-  try {
-    return await fetchPromise;
-  } finally {
-    inFlightImageFetches.delete(key);
-  }
-}
-
 const app = express();
 app.use(
   cors(
@@ -358,8 +228,10 @@ app.get("/api/read-now", searchLimiter, async (req, res, next) => {
     const mediaHint =
       typeof req.query.media_type === "string" ? req.query.media_type : "";
     const preferManhwa = /manhwa/i.test(mediaHint);
+    const malId = z.coerce.number().int().positive().optional().parse(req.query.mal_id);
     const resolved = await resolveDirectReadNow(titleCandidates, {
       preferManhwa,
+      malId,
     });
     if (!resolved) {
       throw new IngestError(
@@ -368,9 +240,12 @@ app.get("/api/read-now", searchLimiter, async (req, res, next) => {
         404,
       );
     }
+    // Start only the chapter the user selected. The subsequent ingest joins
+    // this same cached/in-flight fetch; no second vendor request is needed.
+    void fetchChapterHtml(resolved.chapterUrl).catch(() => {});
     res.json(resolved);
   } catch (error) {
-    next(error);
+    next(error instanceof ReadNowUnavailableError ? new IngestError("INGEST_FAILED", error.message, 503) : error);
   }
 });
 
@@ -393,8 +268,10 @@ app.get("/api/rag/search", searchLimiter, async (req, res, next) => {
 
 app.get("/api/rag/search/stream", searchLimiter, async (req, res) => {
   let lastWriteAt = 0;
+  let waitingTimer: ReturnType<typeof setTimeout> | undefined;
 
   const writeLine = (payload: unknown) => {
+    if (res.destroyed || res.writableEnded) return;
     res.write(`${JSON.stringify(payload)}\n`);
   };
 
@@ -409,6 +286,13 @@ app.get("/api/rag/search/stream", searchLimiter, async (req, res) => {
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.setHeader("Surrogate-Control", "no-store");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    waitingTimer = setTimeout(() => {
+      writeLine({ type: "status", message: "Search is taking a little longer. Thanks for waiting." });
+    }, 2000);
+    waitingTimer.unref();
+    res.once("close", () => clearTimeout(waitingTimer));
 
     const result = await searchMangaRag(q, {
       onProgress: async (progress) => {
@@ -436,6 +320,8 @@ app.get("/api/rag/search/stream", searchLimiter, async (req, res) => {
       code: isIngestError(error) ? error.code : "INGEST_FAILED",
     });
     res.end();
+  } finally {
+    clearTimeout(waitingTimer);
   }
 });
 
@@ -458,8 +344,11 @@ app.post("/api/suggestions", ingestLimiter, (req, res, next) => {
 
 const metaResponseCache = new LRUCache<string, { body: unknown }>({
   max: 2048,
+  maxSize: 16 * 1024 * 1024,
+  sizeCalculation: (value) => Math.max(1, Buffer.byteLength(JSON.stringify(value), "utf8")),
   ttl: 30 * 60 * 1000,
 });
+const inFlightMetaResponses = new Map<string, Promise<unknown>>();
 
 function sendCachedMeta(
   res: express.Response,
@@ -478,11 +367,18 @@ function sendCachedMeta(
             return;
           }
 
-          const body = await produce();
-          metaResponseCache.set(cacheKey, { body });
+          let pending = inFlightMetaResponses.get(cacheKey);
+          if (!pending) {
+            pending = produce().finally(() => inFlightMetaResponses.delete(cacheKey));
+            inFlightMetaResponses.set(cacheKey, pending);
+          }
+          const body = await pending;
+          if (body !== null && body !== undefined) metaResponseCache.set(cacheKey, { body });
+          else res.setHeader("Cache-Control", "no-store");
           res.json(body);
         } catch (error) {
           if (!res.headersSent) {
+            res.setHeader("Cache-Control", "no-store");
             res.status(502).json({
               error:
                 error instanceof Error

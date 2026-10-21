@@ -1,0 +1,11 @@
+import type { HtmlTagDescriptor } from "vite";
+export const PRODUCTION_ORIGIN: string;
+export const SITE_NAME: string;
+export const SITE_TITLE: string;
+export const SITE_DESCRIPTION: string;
+export const GUIDE_PATH: string;
+export function resolveSiteOrigin(env?: Record<string, string | undefined>): string;
+export function structuredData(origin: string): { "@context": string; "@graph": Record<string, unknown>[] };
+export function seoTags(origin: string, preview?: boolean): HtmlTagDescriptor[];
+export function sitemapXml(origin: string): string;
+export function robotsTxt(origin: string): string;

@@ -61,12 +61,15 @@ fi
 
 echo "Validating required env vars..."
 require_value "${BACKEND_ENV_FILE}" "RAG_API_URL"
-require_any_value "${BACKEND_ENV_FILE}" "CEREBRAS_API_KEY" "OPENAI_API_KEY"
 require_value "${RAG_ENV_FILE}" "PINECONE_API_KEY"
 require_value "${RAG_ENV_FILE}" "PINECONE_INDEX"
 require_value "${RAG_ENV_FILE}" "PINECONE_NAMESPACE"
 if [ "$(read_env_value "${RAG_ENV_FILE}" "RAG_LLM_RERANK_ENABLED")" = "1" ]; then
-  require_value "${RAG_ENV_FILE}" "CEREBRAS_API_KEY"
+  if [ "$(read_env_value "${RAG_ENV_FILE}" "RAG_LLM_PROVIDER")" = "groq" ]; then
+    require_value "${RAG_ENV_FILE}" "GROQ_API_KEY"
+  else
+    require_value "${RAG_ENV_FILE}" "CEREBRAS_API_KEY"
+  fi
 fi
 
 echo "Restarting services..."

@@ -42,6 +42,9 @@ jobs:
       - name: Compile RAG code
         run: python -m py_compile rag/rag_api.py rag/eval/golden_top4000_pipeline.py
 
+      - name: Validate search contracts
+        run: python -m unittest rag.eval.test_search_contracts rag.eval.test_character_and_groq rag.eval.test_full_enrichment rag.eval.test_bulk_enrichment -v
+
       - name: Start RAG service
         run: |
           nohup python -m uvicorn rag.rag_api:app --host 127.0.0.1 --port 8090 > /tmp/rag-api.out 2> /tmp/rag-api.err &
@@ -65,6 +68,31 @@ jobs:
             --timeout-seconds 12 \
             --output-path /tmp/golden_top4000_results.json
 
+      - name: Verify broad title and alias coverage
+        run: |
+          python -m rag.eval.catalog_eval \
+            --coverage 0.9 \
+            --kinds title,alias,romanized_alias \
+            --in-process \
+            --workers 4 \
+            --min-hit1 0.95 \
+            --output /tmp/catalog_title_results.json
+
+      - name: Audit expanded human-query suite
+        id: human_queries
+        continue-on-error: true
+        run: |
+          python -m rag.eval.catalog_eval \
+            --human \
+            --endpoint http://127.0.0.1:8090/rag/search \
+            --workers 2 \
+            --min-hit1 0.95 \
+            --output /tmp/human_search_results.json
+
+      - name: Report human-query target gap
+        if: steps.human_queries.outcome == 'failure'
+        run: echo '::warning::Expanded human-query suite did not meet 95% hits@1. See human_search_results.json. Existing regression deployment gate is unchanged.'
+
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -74,3 +102,6 @@ jobs:
             /tmp/rag-api.out
             /tmp/rag-api.err
             /tmp/golden_top4000_results.json
+            /tmp/human_search_results.json
+            /tmp/human_search_results.jsonl
+            /tmp/catalog_title_results.json

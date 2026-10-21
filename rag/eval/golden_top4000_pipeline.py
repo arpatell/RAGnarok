@@ -34,6 +34,7 @@ class GoldenCase:
     query: str
     target_title: str
     target_mal_id: int
+    expected_absent: bool = False
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,6 +55,7 @@ def parse_args() -> argparse.Namespace:
         help="Optional prebuilt golden cases JSON. When set, case generation from docs-jsonl is skipped.",
     )
     parser.add_argument("--rag-endpoint", default="http://127.0.0.1:8090/rag/search")
+    parser.add_argument("--in-process", action="store_true", help="Evaluate the production service locally without an HTTP server")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--per-medium", type=int, default=100, help="Cases per medium (anime, manga).")
     parser.add_argument("--semantic-ratio", type=float, default=0.75, help="Semantic query ratio per medium.")
@@ -121,6 +123,7 @@ def load_cases(path: Path) -> list[GoldenCase]:
                 query=query,
                 target_title=target_title,
                 target_mal_id=target_mal_id,
+                expected_absent=row.get("expected_absent") is True,
             )
         )
     return cases
@@ -572,16 +575,6 @@ def build_cases(
     return cases
 
 
-def is_match(target_title: str, target_mal_id: int, result_title: str, result_mal_id: int | None) -> bool:
-    if isinstance(result_mal_id, int) and result_mal_id == target_mal_id:
-        return True
-    target_norm = normalize_title(target_title)
-    result_norm = normalize_title(result_title)
-    if not target_norm or not result_norm:
-        return False
-    return target_norm == result_norm or target_norm in result_norm or result_norm in target_norm
-
-
 def evaluate_case(
     client: httpx.Client,
     endpoint: str,
@@ -590,7 +583,7 @@ def evaluate_case(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     try:
-        response = client.post(endpoint, json={"query": case.query})
+        response = client.post(endpoint, json={"query": case.query, "media_type": case.medium})
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         response.raise_for_status()
         payload = response.json()
@@ -608,17 +601,31 @@ def evaluate_case(
             "target_mal_id": case.target_mal_id,
             "hit": False,
             "hit_rank": None,
+            "hit1": False,
+            "expected_absent": case.expected_absent,
             "elapsed_ms": elapsed_ms,
             "top_titles": [],
             "error": clean_text(str(exc)) or "request_failed",
         }
 
     hit_rank: int | None = None
-    for idx, row in enumerate(results[:top_k_success], start=1):
+    media_leak = False
+    for row in results:
+        medium = row.get("media_type") if isinstance(row, dict) else None
+        if medium is None and isinstance(row, dict):
+            match = re.search(r"\bType:\s*(anime|manga)\b", str(row.get("snippet", "")), re.I)
+            medium = match.group(1).lower() if match else None
+        media_leak |= medium != case.medium
+    checked_results = results if case.expected_absent else results[:top_k_success]
+    for idx, row in enumerate(checked_results, start=1):
         title = clean_text(row.get("title")) if isinstance(row, dict) else ""
         mal_id_raw = row.get("mal_id") if isinstance(row, dict) else None
         mal_id = mal_id_raw if isinstance(mal_id_raw, int) else None
-        if is_match(case.target_title, case.target_mal_id, title, mal_id):
+        medium = row.get("media_type") if isinstance(row, dict) else None
+        if medium is None and isinstance(row, dict):
+            match = re.search(r"\bType:\s*(anime|manga)\b", str(row.get("snippet", "")), re.I)
+            medium = match.group(1).lower() if match else None
+        if medium == case.medium and mal_id == case.target_mal_id:
             hit_rank = idx
             break
 
@@ -634,8 +641,11 @@ def evaluate_case(
         "query": case.query,
         "target_title": case.target_title,
         "target_mal_id": case.target_mal_id,
-        "hit": hit_rank is not None,
+        "hit": (hit_rank is None if case.expected_absent else hit_rank is not None) and not media_leak,
         "hit_rank": hit_rank,
+        "expected_absent": case.expected_absent,
+        "hit1": hit_rank == 1 and not case.expected_absent and not media_leak,
+        "media_leak": media_leak,
         "elapsed_ms": elapsed_ms,
         "top_titles": top_titles,
         "error": None,
@@ -669,6 +679,10 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "errors": errors,
         "hit_rate": round(hits / max(1, total), 4),
         "avg_latency_ms": avg_ms,
+        "positive_cases": sum(not row.get("expected_absent") for row in results),
+        "positive_hit1": sum(bool(row.get("hit1")) for row in results) / max(1, sum(not row.get("expected_absent") for row in results)),
+        "policy_negative_cases": sum(bool(row.get("expected_absent")) for row in results),
+        "media_leaks": sum(bool(row.get("media_leak")) for row in results),
         "groups": by_group,
     }
 
@@ -697,7 +711,15 @@ def main() -> None:
 
     timeout = httpx.Timeout(args.timeout_seconds)
     results: list[dict[str, Any]] = []
-    with httpx.Client(timeout=timeout) as client:
+    transport = None
+    if args.in_process:
+        from rag.rag_api import HybridRagService, RagSearchRequest, load_config
+        service = HybridRagService(load_config())
+        def handle(request):
+            payload = RagSearchRequest.model_validate_json(request.content)
+            return httpx.Response(200, json=service.search(payload.query, payload.media_type).model_dump())
+        transport = httpx.MockTransport(handle)
+    with httpx.Client(timeout=timeout, transport=transport) as client:
         for case in cases:
             row = evaluate_case(client, args.rag_endpoint, case, args.top_k_success)
             results.append(row)

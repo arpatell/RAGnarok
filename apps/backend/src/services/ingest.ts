@@ -20,10 +20,20 @@ const urlSchema = z.string().url();
 
 const parseCache = new LRUCache<string, IngestResponse>({
   max: 500,
+  maxSize: 24 * 1024 * 1024,
+  sizeCalculation: (value) => Buffer.byteLength(JSON.stringify(value), "utf8"),
   // Chapter pages are stable; 60 min keeps repeat opens off the upstream site
   // entirely while staying small enough for the e2-micro memory budget.
   ttl: 60 * 60 * 1000,
 });
+const ingestInFlight = new Map<string, Promise<IngestResponse>>();
+const seriesChapterCache = new LRUCache<string, ChapterListItem[]>({
+  max: 100,
+  maxSize: 8 * 1024 * 1024,
+  sizeCalculation: (value) => Math.max(1, Buffer.byteLength(JSON.stringify(value), "utf8")),
+  ttl: 10 * 60 * 1000,
+});
+const seriesChapterInFlight = new Map<string, Promise<ChapterListItem[]>>();
 
 const CHAPTER_LINK_SELECTORS = [
   ".chapters a",
@@ -585,8 +595,11 @@ async function postManhwaZoneLivewire(
   cookieHeader: string,
   snapshot: string,
   method: "bootLoad" | "loadMore",
+  firstOnly = false,
+  batchPages = true,
 ): Promise<string | null> {
   const response = await fetch(endpoint, {
+    signal: AbortSignal.timeout(6_000),
     method: "POST",
     headers: {
       "User-Agent": BROWSER_UA,
@@ -602,7 +615,7 @@ async function postManhwaZoneLivewire(
       components: [
         {
           snapshot,
-          updates: {},
+          updates: firstOnly ? { sortOrder: "asc" } : batchPages ? { perPage: 250 } : {},
           calls: [{ path: "", method, params: [] }],
         },
       ],
@@ -620,11 +633,13 @@ async function postManhwaZoneLivewire(
   return payload.components?.[0]?.snapshot ?? null;
 }
 
-async function fetchManhwaZoneLivewireChapterList(
+async function loadManhwaZoneLivewireChapterList(
   seriesUrl: string,
+  firstOnly = false,
 ): Promise<ChapterListItem[]> {
   try {
     const seriesResponse = await fetch(seriesUrl, {
+      signal: AbortSignal.timeout(6_000),
       headers: {
         "User-Agent": BROWSER_UA,
         Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
@@ -648,20 +663,28 @@ async function fetchManhwaZoneLivewireChapterList(
       seriesResponse.headers.get("set-cookie"),
     );
     const unique = new Map<string, ChapterListItem>();
+    let batchPages = true;
 
     const methods: Array<"bootLoad" | "loadMore"> = [
       "bootLoad",
-      ...Array.from({ length: 20 }, () => "loadMore" as const),
+      ...Array.from({ length: firstOnly ? 0 : 20 }, () => "loadMore" as const),
     ];
     for (const method of methods) {
-      const nextSnapshot = await postManhwaZoneLivewire(
+      let nextSnapshot = await postManhwaZoneLivewire(
         endpoint,
         seriesUrl,
         token,
         cookieHeader,
         snapshot,
         method,
+        firstOnly,
+        batchPages,
       );
+      if (!nextSnapshot && method === "bootLoad" && !firstOnly) {
+        // Preserve compatibility if the provider stops accepting page-size updates.
+        batchPages = false;
+        nextSnapshot = await postManhwaZoneLivewire(endpoint, seriesUrl, token, cookieHeader, snapshot, method, false, false);
+      }
       if (!nextSnapshot) {
         break;
       }
@@ -680,6 +703,29 @@ async function fetchManhwaZoneLivewireChapterList(
     return Array.from(unique.values());
   } catch {
     return [];
+  }
+}
+
+export async function fetchManhwaZoneLivewireChapterList(
+  seriesUrl: string,
+  firstOnly = false,
+): Promise<ChapterListItem[]> {
+  const fullKey = `all:${seriesUrl}`;
+  const key = firstOnly ? `first:${seriesUrl}` : fullKey;
+  const cached = seriesChapterCache.get(fullKey) ?? seriesChapterCache.get(key);
+  if (cached) return cached;
+  const pending = seriesChapterInFlight.get(fullKey) ?? seriesChapterInFlight.get(key);
+  if (pending) return pending;
+  const work = loadManhwaZoneLivewireChapterList(seriesUrl, firstOnly).then((chapters) => {
+    // Never cache a provider failure as a successful empty chapter list.
+    if (chapters.length) seriesChapterCache.set(key, chapters);
+    return chapters;
+  });
+  seriesChapterInFlight.set(key, work);
+  try {
+    return await work;
+  } finally {
+    seriesChapterInFlight.delete(key);
   }
 }
 
@@ -1058,5 +1104,13 @@ async function ingestUrlInternal(
 }
 
 export async function ingestUrl(rawUrl: string): Promise<IngestResponse> {
-  return ingestUrlInternal(rawUrl, 0);
+  const pending = ingestInFlight.get(rawUrl);
+  if (pending) return pending;
+  const work = ingestUrlInternal(rawUrl, 0);
+  ingestInFlight.set(rawUrl, work);
+  try {
+    return await work;
+  } finally {
+    ingestInFlight.delete(rawUrl);
+  }
 }

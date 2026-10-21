@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "source": "MAL API v2 ranking catalog",
+  "eligible_titles": 83554,
+  "indexed_titles": 83554,
+  "character_pages_checked": 3947,
+  "titles_with_character_names": 13708,
+  "titles_with_character_biographies": 10366,
+  "structured_character_rosters": 12353,
+  "titles_with_full_mal_details": 98,
+  "unique_character_profiles": 185806,
+  "excluded_genres": [
+    "Boys Love",
+    "Girls Love",
+    "Erotica",
+    "Hentai"
+  ],
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "bm25_vocabulary": "rag/ingestion/bm25_values.json"
+}

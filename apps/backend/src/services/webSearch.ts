@@ -3,6 +3,7 @@ import { LRUCache } from "lru-cache";
 import { resolveAdapterForUrl } from "../adapters/index.js";
 import { sortChapterList } from "./chapterSort.js";
 import { fetchChapterHtml } from "./fetchProxy.js";
+import { fetchManhwaZoneLivewireChapterList } from "./ingest.js";
 
 const MAX_CANDIDATE_URLS = 12;
 const MAX_RESULTS = 6;
@@ -80,6 +81,8 @@ export interface ReadNowResolution {
   sourceDomain: string;
 }
 
+export class ReadNowUnavailableError extends Error {}
+
 interface SourceReadNowMatch {
   queryTitle: string;
   candidate: SourceSeriesCandidate;
@@ -94,11 +97,11 @@ const MANHWAZONE_BASE_URL = "https://manhwazone.com";
 const MANHWAZONE_DOMAIN = "manhwazone.com";
 const MANHWAZONE_SEARCH_TIMEOUT_MS = Math.max(750, Number.parseInt(process.env.MANHWAZONE_SEARCH_TIMEOUT_MS ?? "1600", 10));
 const MANHWAZONE_SEARCH_LIMIT = Math.max(1, Number.parseInt(process.env.MANHWAZONE_SEARCH_LIMIT ?? "8", 10));
-const MIN_READ_NOW_TITLE_SCORE = 0.58;
-const READ_NOW_TIMEOUT_MS = Math.max(1_500, Number.parseInt(process.env.READ_NOW_TIMEOUT_MS ?? "3200", 10));
+const MIN_READ_NOW_TITLE_SCORE = 0.9;
+const READ_NOW_TIMEOUT_MS = Math.max(1_500, Number.parseInt(process.env.READ_NOW_TIMEOUT_MS ?? "5500", 10));
 const READ_NOW_SERIES_RESOLVE_TIMEOUT_MS = Math.max(
   600,
-  Number.parseInt(process.env.READ_NOW_SERIES_RESOLVE_TIMEOUT_MS ?? "1000", 10)
+  Number.parseInt(process.env.READ_NOW_SERIES_RESOLVE_TIMEOUT_MS ?? "1800", 10)
 );
 const READ_NOW_TITLE_VARIANT_LIMIT = Math.max(1, Number.parseInt(process.env.READ_NOW_TITLE_VARIANT_LIMIT ?? "2", 10));
 const READ_NOW_CACHE_TTL_MS = Math.max(0, Number.parseInt(process.env.READ_NOW_CACHE_TTL_MS ?? "600000", 10));
@@ -109,11 +112,13 @@ interface SourceSeriesCandidate {
   firstChapterUrl?: string;
 }
 
-type FirstChapterResolution = { chapterUrl: string; matchedTitle: string };
+type FirstChapterResolution = { chapterUrl: string; matchedTitle: string; malIds: number[] };
 type FirstChapterCacheValue = FirstChapterResolution | { miss: true };
 
 export interface ReadNowResolveOptions {
+  malId?: number;
   preferManhwa?: boolean;
+  source?: "weebcentral" | "manhwazone";
 }
 
 const readNowCache = new LRUCache<string, ReadNowResolution>({
@@ -131,7 +136,7 @@ const firstChapterCache = new LRUCache<string, FirstChapterCacheValue>({
 const inFlightReadNowResolutions = new Map<string, Promise<ReadNowResolution | null>>();
 
 function isLatinReadableTitle(value: string): boolean {
-  const cleaned = cleanTitle(value);
+  const cleaned = cleanReadNowTitle(value);
   if (!cleaned || cleaned.length < 2) {
     return false;
   }
@@ -146,13 +151,14 @@ function isLatinReadableTitle(value: string): boolean {
 function normalizeSeriesSlug(slug: string): string {
   return slug
     .replace(/\.\d+$/, "")
-    .replace(/[-_][a-z0-9]{4,10}$/i, "")
+    .replace(/[-_](?=[a-z0-9]{4,10}$)(?=[a-z0-9]*\d)[a-z0-9]+$/i, "")
     .replace(/[-_]+/g, " ")
     .trim();
 }
 
 function normalizeTitle(value: string): string {
   return value
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
@@ -169,8 +175,8 @@ function parseChapterNumber(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isChapterOneLabel(value: string | null | undefined): boolean {
-  return /\b(?:chapter|ch\.?|episode|ep\.?)\s*0*1(?:\.0+)?\b/i.test(value ?? "");
+export function isChapterOneLabel(value: string | null | undefined): boolean {
+  return /\b(?:chapter|ch\.?|episode|ep\.?)\s*0*1(?:\.0+)?(?![\d.])\b/i.test(value ?? "");
 }
 
 function chooseChapterOne(chapterList: Array<{ number: string; title: string | null; url: string; special?: boolean }>) {
@@ -180,15 +186,8 @@ function chooseChapterOne(chapterList: Array<{ number: string; title: string | n
       const parsed = parseChapterNumber(chapter.number || chapter.title);
       return parsed === 1 && chapter.special !== true;
     }) ??
-    chapterList.find((chapter) => chapter.special !== true) ??
-    chapterList[0] ??
     null
   );
-}
-
-function isExplicitChapterOneUrl(url: string): boolean {
-  const inferred = inferChapterLabel("", url);
-  return isChapterOneLabel(inferred) || parseChapterNumber(inferred) === 1;
 }
 
 const TITLE_STOPWORDS = new Set([
@@ -237,7 +236,7 @@ function seriesNameFromSeriesUrl(seriesUrl: string): string {
   }
 }
 
-function titleSimilarityScore(queryTitle: string, candidateTitle: string): number {
+export function titleSimilarityScore(queryTitle: string, candidateTitle: string): number {
   const queryNorm = normalizeTitle(queryTitle);
   const candidateNorm = normalizeTitle(candidateTitle);
   if (!queryNorm || !candidateNorm) {
@@ -247,52 +246,14 @@ function titleSimilarityScore(queryTitle: string, candidateTitle: string): numbe
     return 1;
   }
 
-  const queryTokens = tokenizeTitle(queryTitle);
-  const candidateTokens = tokenizeTitle(candidateTitle);
-  if (queryTokens.length === 0 || candidateTokens.length === 0) {
-    return 0;
+  // Shared words do not establish identity: editions are aliases, sequels are not.
+  const editionPattern = /\b(?:full color|full colour|colored|coloured|official|digital|uncensored)\b/g;
+  const queryIdentity = queryNorm.replace(editionPattern, "").replace(/\s+/g, " ").trim();
+  const candidateIdentity = candidateNorm.replace(editionPattern, "").replace(/\s+/g, " ").trim();
+  if (queryIdentity === candidateIdentity) {
+    return 0.99;
   }
-
-  const querySet = new Set(queryTokens);
-  const candidateSet = new Set(candidateTokens);
-  let intersectionCount = 0;
-  for (const token of querySet) {
-    if (candidateSet.has(token)) {
-      intersectionCount += 1;
-    }
-  }
-
-  const queryCoverage = intersectionCount / querySet.size;
-  const candidateCoverage = intersectionCount / candidateSet.size;
-  const dice = (2 * intersectionCount) / (querySet.size + candidateSet.size);
-  let score = Math.max(dice, (queryCoverage * 0.7) + (candidateCoverage * 0.3));
-
-  if (candidateNorm.includes(queryNorm) || queryNorm.includes(candidateNorm)) {
-    score = Math.max(score, 0.82);
-  }
-
-  // Loose title matching should tolerate subtitles and scan-site suffixes, but not unrelated first results.
-  if (queryCoverage === 1 && querySet.size >= 2) {
-    score = Math.max(score, 0.74);
-  }
-
-  const queryPhrase = queryTokens.join(" ");
-  const candidatePhrase = candidateTokens.join(" ");
-  if (queryPhrase.length >= 8 && candidatePhrase.includes(queryPhrase)) {
-    score = 1;
-  } else if (candidatePhrase.length >= 8 && queryPhrase.includes(candidatePhrase)) {
-    score = Math.max(score, 0.86);
-  }
-
-  if (intersectionCount >= 3 && querySet.size >= 3) {
-    score = Math.max(score, 0.68);
-  }
-
-  if (intersectionCount >= 2 && querySet.size >= 3 && candidateSet.size >= 2) {
-    score = Math.max(score, 0.62);
-  }
-
-  return Math.min(1, score);
+  return 0;
 }
 
 function isWeebCentralHost(url: string): boolean {
@@ -351,21 +312,7 @@ function isManhwaZoneSeriesUrl(url: string): boolean {
 
     const segments = parsed.pathname.split("/").filter(Boolean);
     const first = segments[0]?.toLowerCase() ?? "";
-    if (segments.length === 0 || first === "search") {
-      return false;
-    }
-
-    return ![
-      "account",
-      "auth",
-      "cdn-cgi",
-      "contact",
-      "dmca",
-      "login",
-      "privacy",
-      "register",
-      "terms"
-    ].includes(first);
+    return first === "series" && Boolean(segments[1]);
   } catch {
     return false;
   }
@@ -389,6 +336,10 @@ function cleanCandidateText(value: string | undefined | null): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function cleanReadNowTitle(value: string): string {
+  return cleanCandidateText(value).replace(/\s+cover\s*$/i, "").replace(/\s*\|\s*(?:weeb\s*central|manhwazone).*$/i, "").trim();
+}
+
 function extractAnchorCandidateTitle(anchor: cheerio.Cheerio<any>): string {
   const textLines = (anchor.text() ?? "")
     .split(/\r?\n/)
@@ -407,7 +358,7 @@ function extractAnchorCandidateTitle(anchor: cheerio.Cheerio<any>): string {
   for (const value of values) {
     const cleaned = cleanCandidateText(value);
     if (cleaned && cleaned.length <= 180) {
-      return cleanTitle(cleaned);
+      return cleanReadNowTitle(cleaned);
     }
   }
 
@@ -415,8 +366,13 @@ function extractAnchorCandidateTitle(anchor: cheerio.Cheerio<any>): string {
 }
 
 function buildWeebCentralSearchUrl(title: string): string {
-  const query = new URLSearchParams({ text: title }).toString().replace(/^text=/, "");
+  const query = new URLSearchParams({ text: sourceSearchText(title) }).toString().replace(/^text=/, "");
   return `${WEEBCENTRAL_BASE_URL}/search/data?text=${query}&sort=Best+Match&order=Descending&official=Any&anime=Any&adult=Any&display_mode=Full+Display`;
+}
+
+function sourceSearchText(title: string): string {
+  // Query punctuation is not identity evidence; keep every word and subtitle.
+  return title.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
 }
 
 function extractWeebCentralCandidateTitle(anchor: cheerio.Cheerio<any>, seriesUrl: string): string {
@@ -438,7 +394,7 @@ function extractWeebCentralCandidateTitle(anchor: cheerio.Cheerio<any>, seriesUr
   }
 
   for (const value of titleCandidates) {
-    const cleaned = cleanTitle(cleanCandidateText(value));
+    const cleaned = cleanReadNowTitle(cleanCandidateText(value));
     if (cleaned && cleaned.length <= 180 && !/^(official|subscribe|show details)$/i.test(cleaned)) {
       return cleaned;
     }
@@ -451,12 +407,14 @@ async function fetchWeebCentralSearchSeriesCandidates(title: string): Promise<So
   const cacheKey = `weebcentral:search:${normalizeTitle(title)}`;
   const cached = sourceSearchCache.get(cacheKey);
   if (cached !== undefined) {
+    console.log(`[read-now] weebcentral search cache-hit candidates=${cached.length} query=${JSON.stringify(title)}`);
     return cached;
   }
 
   const searchUrl = buildWeebCentralSearchUrl(title);
 
   try {
+    console.log(`[read-now] weebcentral search request query=${JSON.stringify(sourceSearchText(title))}`);
     const response = await fetch(searchUrl, {
       headers: {
         "User-Agent": BROWSER_UA,
@@ -470,7 +428,7 @@ async function fetchWeebCentralSearchSeriesCandidates(title: string): Promise<So
     console.log(`[read-now] weebcentral status=${response.status} ok=${response.ok} query="${title.substring(0, 60)}"`);
 
     if (!response.ok) {
-      return [];
+      throw new Error(`WeebCentral search HTTP ${response.status}`);
     }
 
     const html = await response.text();
@@ -506,12 +464,12 @@ async function fetchWeebCentralSearchSeriesCandidates(title: string): Promise<So
     // eslint-disable-next-line no-console
     console.log(`[read-now] weebcentral candidates=${sorted.length} query="${title.substring(0, 60)}"`);
 
-    sourceSearchCache.set(cacheKey, sorted);
+    sourceSearchCache.set(cacheKey, sorted, { ttl: sorted.length ? READ_NOW_CACHE_TTL_MS : 10_000 });
     return sorted;
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error(`[read-now] weebcentral fetch error query="${title.substring(0, 60)}": ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    throw err;
   }
 }
 
@@ -526,7 +484,7 @@ function upsertManhwaZoneCandidate(
   title: string,
   firstChapterUrl?: string
 ): void {
-  const candidateTitle = cleanTitle(title) || seriesNameFromSeriesUrl(seriesUrl);
+  const candidateTitle = cleanReadNowTitle(title) || seriesNameFromSeriesUrl(seriesUrl);
   if (!candidateTitle) {
     return;
   }
@@ -543,12 +501,14 @@ async function fetchManhwaZoneSearchSeriesCandidates(title: string): Promise<Sou
   const cacheKey = `manhwazone:search:${normalizeTitle(title)}`;
   const cached = sourceSearchCache.get(cacheKey);
   if (cached !== undefined) {
+    console.log(`[read-now] manhwazone search cache-hit candidates=${cached.length} query=${JSON.stringify(title)}`);
     return cached;
   }
 
-  const searchUrl = `${MANHWAZONE_BASE_URL}/search?keyword=${encodeURIComponent(title)}`;
+  const searchUrl = `${MANHWAZONE_BASE_URL}/search?keyword=${encodeURIComponent(sourceSearchText(title))}`;
 
   try {
+    console.log(`[read-now] manhwazone search request query=${JSON.stringify(sourceSearchText(title))}`);
     const response = await fetch(searchUrl, {
       headers: {
         "User-Agent": BROWSER_UA,
@@ -562,37 +522,12 @@ async function fetchManhwaZoneSearchSeriesCandidates(title: string): Promise<Sou
     console.log(`[read-now] manhwazone status=${response.status} ok=${response.ok} query="${title.substring(0, 60)}"`);
 
     if (!response.ok) {
-      return [];
+      throw new Error(`ManhwaZone search HTTP ${response.status}`);
     }
 
     const html = await response.text();
     const $ = cheerio.load(html);
     const candidates = new Map<string, SourceSeriesCandidate>();
-
-    $("a[href]").each((_, el) => {
-      const anchor = $(el);
-      const href = anchor.attr("href") ?? "";
-      const resolved = resolveUrl(MANHWAZONE_BASE_URL, href);
-      if (!isManhwaZonePreviewUrl(resolved)) {
-        return;
-      }
-
-      const container = anchor.parent().parent();
-      container.find("a[href*='/series/']").each((__, seriesEl) => {
-        const seriesAnchor = $(seriesEl);
-        const seriesHref = seriesAnchor.attr("href") ?? "";
-        const seriesUrl = resolveUrl(MANHWAZONE_BASE_URL, seriesHref);
-        if (!isManhwaZoneSeriesUrl(seriesUrl)) {
-          return;
-        }
-
-        const anchorTitle = extractAnchorCandidateTitle(seriesAnchor);
-        const seriesTitle = isGenericManhwaZoneLabel(anchorTitle)
-          ? seriesNameFromSeriesUrl(seriesUrl)
-          : anchorTitle || seriesNameFromSeriesUrl(seriesUrl);
-        upsertManhwaZoneCandidate(candidates, seriesUrl, seriesTitle, resolved);
-      });
-    });
 
     $("a[href]").each((_, el) => {
       const anchor = $(el);
@@ -626,12 +561,12 @@ async function fetchManhwaZoneSearchSeriesCandidates(title: string): Promise<Sou
     // eslint-disable-next-line no-console
     console.log(`[read-now] manhwazone candidates=${sorted.length} query="${title.substring(0, 60)}"`);
 
-    sourceSearchCache.set(cacheKey, sorted);
+    sourceSearchCache.set(cacheKey, sorted, { ttl: sorted.length ? READ_NOW_CACHE_TTL_MS : 10_000 });
     return sorted;
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error(`[read-now] manhwazone fetch error query="${title.substring(0, 60)}": ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    throw err;
   }
 }
 
@@ -679,14 +614,14 @@ function getWeebCentralButtonChapterUrl(button: cheerio.Cheerio<any>, baseUrl: s
   return baseUrl;
 }
 
-function parseWeebCentralSeriesChapterList($: cheerio.CheerioAPI, baseUrl: string): DirectSourceChapter[] {
+function parseWeebCentralSeriesChapterList($: cheerio.CheerioAPI, baseUrl: string, fullList = false): DirectSourceChapter[] {
   const unique = new Map<string, DirectSourceChapter>();
   const chapterGrid = getWeebCentralChapterGrid($);
 
   chapterGrid.find("a[href]").each((_, node) => {
     const anchor = $(node);
     const url = resolveUrl(baseUrl, anchor.attr("href") ?? "");
-    if (!url) {
+    if (!isWeebCentralChapterUrl(url)) {
       return;
     }
 
@@ -713,7 +648,7 @@ function parseWeebCentralSeriesChapterList($: cheerio.CheerioAPI, baseUrl: strin
     });
   });
 
-  $("#chapter-list a[href*='/chapters/']").each((_, node) => {
+  $(fullList ? "a[href*='/chapters/']" : "#chapter-list a[href*='/chapters/']").each((_, node) => {
     const anchor = $(node);
     const url = resolveUrl(baseUrl, anchor.attr("href") ?? "");
     if (!isWeebCentralChapterUrl(url)) {
@@ -743,6 +678,7 @@ function parseManhwaZoneSeriesChapterList($: cheerio.CheerioAPI, baseUrl: string
     }
 
     const url = resolveUrl(baseUrl, href);
+    if (!isManhwaZonePreviewUrl(url)) return;
     const title = cleanChapterLabel(anchor.find("span.truncate.flex-1").first().text());
     unique.set(url, {
       number: inferChapterLabel(title, url),
@@ -752,6 +688,18 @@ function parseManhwaZoneSeriesChapterList($: cheerio.CheerioAPI, baseUrl: string
   });
 
   return Array.from(unique.values());
+}
+
+function sourceMalIds($: cheerio.CheerioAPI): number[] {
+  const ids = new Set<number>();
+  $("a[href*='myanimelist.net']").each((_, node) => {
+    try {
+      const url = new URL($(node).attr("href") ?? "");
+      const match = url.pathname.match(/^\/manga\/(\d+)(?:\/|$)/);
+      if (url.hostname === "myanimelist.net" && match) ids.add(Number(match[1]));
+    } catch { /* Ignore non-absolute or malformed external links. */ }
+  });
+  return [...ids];
 }
 
 async function resolveFirstWeebCentralChapterFromSeriesUrl(
@@ -764,29 +712,39 @@ async function resolveFirstWeebCentralChapterFromSeriesUrl(
     return "miss" in cached ? null : cached;
   }
 
-  const fetched = await fetchChapterHtml(seriesUrl);
+  const fetched = await fetchChapterHtml(seriesUrl, { timeoutMs: READ_NOW_SERIES_RESOLVE_TIMEOUT_MS, maxAttempts: 1 });
+  if (fetched.status >= 500 || fetched.status === 429) throw new ReadNowUnavailableError(`WeebCentral series HTTP ${fetched.status}`);
   if (fetched.status >= 400 || !fetched.html) {
-    firstChapterCache.set(cacheKey, { miss: true });
+    firstChapterCache.set(cacheKey, { miss: true }, { ttl: 10_000 });
     return null;
   }
 
   const $ = cheerio.load(fetched.html);
-  const chapterList = sortChapterList(parseWeebCentralSeriesChapterList($, fetched.finalUrl));
-  const firstChapter = chooseChapterOne(chapterList);
+  let firstChapter = chooseChapterOne(sortChapterList(parseWeebCentralSeriesChapterList($, fetched.finalUrl)));
+  if (!firstChapter && $("[hx-get*='full-chapter-list']").length) {
+    const path = new URL(seriesUrl).pathname.split("/").filter(Boolean);
+    const fullUrl = `${WEEBCENTRAL_BASE_URL}/series/${path[1]}/full-chapter-list`;
+    console.log(`[read-now] weebcentral chapter-list request url=${fullUrl}`);
+    const full = await fetchChapterHtml(fullUrl, { timeoutMs: READ_NOW_SERIES_RESOLVE_TIMEOUT_MS, maxAttempts: 1 });
+    if (full.status >= 500 || full.status === 429) throw new ReadNowUnavailableError(`WeebCentral chapter list HTTP ${full.status}`);
+    if (full.status < 400 && full.html) firstChapter = chooseChapterOne(sortChapterList(parseWeebCentralSeriesChapterList(cheerio.load(full.html), seriesUrl, true)));
+  }
   if (!firstChapter?.url) {
-    firstChapterCache.set(cacheKey, { miss: true });
+    firstChapterCache.set(cacheKey, { miss: true }, { ttl: 10_000 });
     return null;
   }
 
   const rawTitle =
+    getFirstText($, ["h1"]) ||
     getMetaAttr($, "meta[property='og:title']", "content") ||
     getFirstText($, TITLE_SELECTORS) ||
     fallbackTitle ||
     seriesNameFromSeriesUrl(seriesUrl);
-  const matchedTitle = cleanTitle(rawTitle) || fallbackTitle || seriesNameFromSeriesUrl(seriesUrl);
+  const matchedTitle = cleanReadNowTitle(rawTitle) || fallbackTitle || seriesNameFromSeriesUrl(seriesUrl);
   const resolved = {
     chapterUrl: firstChapter.url,
-    matchedTitle
+    matchedTitle,
+    malIds: sourceMalIds($)
   };
   firstChapterCache.set(cacheKey, resolved);
   return resolved;
@@ -802,31 +760,37 @@ async function resolveFirstManhwaZoneChapterFromSeriesUrl(
     return "miss" in cached ? null : cached;
   }
 
-  const fetched = await fetchChapterHtml(seriesUrl);
+  const fetched = await fetchChapterHtml(seriesUrl, { timeoutMs: Math.max(2500, READ_NOW_SERIES_RESOLVE_TIMEOUT_MS), maxAttempts: 1 });
+  if (fetched.status >= 500 || fetched.status === 429) throw new ReadNowUnavailableError(`ManhwaZone series HTTP ${fetched.status}`);
   if (fetched.status >= 400 || !fetched.html) {
-    firstChapterCache.set(cacheKey, { miss: true });
+    firstChapterCache.set(cacheKey, { miss: true }, { ttl: 10_000 });
     return null;
   }
 
   const $ = cheerio.load(fetched.html);
   const chapterList = parseManhwaZoneSeriesChapterList($, fetched.finalUrl);
+  if (chapterList.length === 0) {
+    chapterList.push(...await fetchManhwaZoneLivewireChapterList(seriesUrl, true));
+  }
 
   const sortedChapters = sortChapterList(chapterList);
   const firstChapter = chooseChapterOne(sortedChapters);
   if (!firstChapter?.url) {
-    firstChapterCache.set(cacheKey, { miss: true });
+    firstChapterCache.set(cacheKey, { miss: true }, { ttl: 10_000 });
     return null;
   }
 
   const rawTitle =
+    getFirstText($, ["h1"]) ||
     getMetaAttr($, "meta[property='og:title']", "content") ||
     getFirstText($, TITLE_SELECTORS) ||
     fallbackTitle;
-  const matchedTitle = cleanTitle(rawTitle) || fallbackTitle;
+  const matchedTitle = cleanReadNowTitle(rawTitle) || fallbackTitle;
 
   const resolved = {
     chapterUrl: firstChapter.url,
-    matchedTitle
+    matchedTitle,
+    malIds: sourceMalIds($)
   };
   firstChapterCache.set(cacheKey, resolved);
   return resolved;
@@ -838,20 +802,19 @@ function buildReadNowTitleCandidates(titles: string[] | string): string[] {
   const seen = new Set<string>();
 
   for (const raw of rawTitles) {
-    const cleaned = cleanTitle(raw);
-    const variants = [
-      cleaned,
-      cleaned.replace(/[^a-zA-Z0-9]+/g, " "),
-      cleaned.replace(/\s*\([^)]*\)\s*/g, " "),
-      cleaned.split(/\s*[-–—:|]\s*/)[0] ?? ""
-    ];
+    const cleaned = cleanReadNowTitle(raw);
+    // Only supplied aliases are identity evidence. Removing subtitles turns
+    // sequels into their parent series and silently opens the wrong work.
+    const variants = [cleaned];
 
     for (const variant of variants) {
-      const value = cleanTitle(variant);
+      const value = cleanReadNowTitle(variant);
       if (!isLatinReadableTitle(value)) {
         continue;
       }
       const key = normalizeTitle(value);
+      const primary = normalizeTitle(cleanReadNowTitle(rawTitles[0] ?? ""));
+      if (key.startsWith(`${primary} `) && titleSimilarityScore(rawTitles[0] ?? "", value) < MIN_READ_NOW_TITLE_SCORE) continue;
       if (!value || value.length < 2 || seen.has(key)) {
         continue;
       }
@@ -945,89 +908,58 @@ function firstNonNull<T>(promises: Array<Promise<T | null>>): Promise<T | null> 
   });
 }
 
-async function resolveWeebCentralReadNowFromTitles(queryTitles: string[]): Promise<ReadNowResolution | null> {
-  const limitedTitles = queryTitles.slice(0, READ_NOW_TITLE_VARIANT_LIMIT);
-  const candidateLists = await Promise.all(limitedTitles.map((queryTitle) => fetchWeebCentralSearchSeriesCandidates(queryTitle)));
-  const candidates = candidateLists.flat();
-
-  const selectedMatch = chooseBestSourceMatch(limitedTitles, candidates);
-  if (!selectedMatch) {
-    // eslint-disable-next-line no-console
-    console.log(`[read-now] weebcentral no loose match candidates=${candidates.length}`);
+async function resolveSourceReadNowFromTitles(queryTitles: string[], source: "weebcentral" | "manhwazone", malId?: number, unavailable?: Set<string>, shouldStop?: () => boolean): Promise<ReadNowResolution | null> {
+  const limitedTitles = queryTitles.slice(0, 4);
+  const search = source === "weebcentral" ? fetchWeebCentralSearchSeriesCandidates : fetchManhwaZoneSearchSeriesCandidates;
+  const resolveSeries = source === "weebcentral" ? resolveFirstWeebCentralChapterFromSeriesUrl : resolveFirstManhwaZoneChapterFromSeriesUrl;
+  const timeout = source === "weebcentral" ? READ_NOW_SERIES_RESOLVE_TIMEOUT_MS : Math.max(2500, READ_NOW_SERIES_RESOLVE_TIMEOUT_MS);
+  const verifyAlias = async (queryTitle: string): Promise<ReadNowResolution | null> => {
+    if (shouldStop?.()) return null;
+    const candidates = await search(queryTitle).catch((error) => { unavailable?.add(source); throw error; });
+    const matches = candidates.map((candidate) => chooseBestSourceMatch(limitedTitles, [candidate]))
+      .filter((match): match is SourceReadNowMatch => match !== null)
+      .sort((a, b) => b.score - a.score).slice(0, 2);
+    // A translated listing can only bypass title matching when its page proves
+    // the selected manga's MAL ID. Never open a loose title match on its own.
+    if (matches.length === 0 && malId) {
+      const queryWords = tokenizeTitle(queryTitle);
+      const plausible = candidates.filter((candidate) => candidates.length === 1 || queryWords.filter((word) => tokenizeTitle(candidate.title).includes(word)).length / Math.max(1, queryWords.length) >= 0.5);
+      for (const candidate of plausible.slice(0, 1)) matches.push({ candidate, queryTitle, score: 0 });
+    }
+    console.log(`[read-now] ${source} verify candidates=${matches.length} query=${JSON.stringify(queryTitle)}`);
+    for (const match of matches) {
+      if (shouldStop?.()) return null;
+      console.log(`[read-now] ${source} series request url=${match.candidate.url}`);
+      const attempt = await withTimeoutValue(resolveSeries(match.candidate.url, match.candidate.title).then((value) => ({ value })), timeout, null)
+        .catch(() => { unavailable?.add(source); return null; });
+      if (!attempt) unavailable?.add(source);
+      const resolved = attempt?.value;
+      if (!resolved) {
+        console.log(`[read-now] ${source} rejected reason=no-chapter-one-or-source-timeout url=${match.candidate.url}`);
+        continue;
+      }
+      const exactMalIdentity = Boolean(malId && resolved.malIds.length === 1 && resolved.malIds[0] === malId);
+      if (malId && resolved.malIds.length === 1 && resolved.malIds[0] !== malId) {
+        console.log(`[read-now] ${source} rejected reason=mal-id-mismatch expected=${malId} actual=${resolved.malIds[0]}`);
+        continue;
+      }
+      if (!exactMalIdentity && !queryTitles.some((title) => titleSimilarityScore(title, resolved.matchedTitle) >= MIN_READ_NOW_TITLE_SCORE)) {
+        console.log(`[read-now] ${source} rejected reason=title-mismatch actual=${JSON.stringify(resolved.matchedTitle)}`);
+        continue;
+      }
+      console.log(`[read-now] ${source} selected title=${JSON.stringify(resolved.matchedTitle)} chapter=${resolved.chapterUrl}`);
+      return { requestedTitle: queryTitles[0] ?? match.queryTitle, matchedTitle: resolved.matchedTitle,
+        seriesUrl: match.candidate.url, chapterUrl: resolved.chapterUrl, sourceDomain: extractDomain(resolved.chapterUrl) };
+    }
     return null;
-  }
-
-  // eslint-disable-next-line no-console
-  console.log(`[read-now] weebcentral selected title="${selectedMatch.candidate.title}" url=${selectedMatch.candidate.url} score=${selectedMatch.score.toFixed(2)}`);
-
-  const resolved = await withTimeoutValue(
-    resolveFirstWeebCentralChapterFromSeriesUrl(
-      selectedMatch.candidate.url,
-      selectedMatch.candidate.title
-    ),
-    READ_NOW_SERIES_RESOLVE_TIMEOUT_MS,
-    null
-  );
-  if (!resolved) {
-    return null;
-  }
-
-  return {
-    requestedTitle: queryTitles[0] ?? selectedMatch.queryTitle,
-    matchedTitle: resolved.matchedTitle,
-    seriesUrl: selectedMatch.candidate.url,
-    chapterUrl: resolved.chapterUrl,
-    sourceDomain: extractDomain(resolved.chapterUrl)
   };
-}
-
-async function resolveManhwaZoneReadNowFromTitles(queryTitles: string[]): Promise<ReadNowResolution | null> {
-  const limitedTitles = queryTitles.slice(0, READ_NOW_TITLE_VARIANT_LIMIT);
-  const candidateLists = await Promise.all(limitedTitles.map((queryTitle) => fetchManhwaZoneSearchSeriesCandidates(queryTitle)));
-  const candidates = candidateLists.flat();
-
-  const selectedMatch = chooseBestSourceMatch(limitedTitles, candidates);
-  if (!selectedMatch) {
-    // eslint-disable-next-line no-console
-    console.log(`[read-now] manhwazone no loose match candidates=${candidates.length}`);
-    return null;
+  const parallel = Math.min(2, READ_NOW_TITLE_VARIANT_LIMIT);
+  for (let start = 0; start < limitedTitles.length; start += parallel) {
+    if (shouldStop?.()) return null;
+    const match = await firstNonNull(limitedTitles.slice(start, start + parallel).map(verifyAlias));
+    if (match) return match;
   }
-
-  // eslint-disable-next-line no-console
-  console.log(`[read-now] manhwazone selected title="${selectedMatch.candidate.title}" url=${selectedMatch.candidate.url} score=${selectedMatch.score.toFixed(2)}`);
-
-  let resolved: { chapterUrl: string; matchedTitle: string } | null = null;
-  if (selectedMatch.candidate.firstChapterUrl && isExplicitChapterOneUrl(selectedMatch.candidate.firstChapterUrl)) {
-    // eslint-disable-next-line no-console
-    console.log(
-      `[read-now] manhwazone using search preview chapter url=${selectedMatch.candidate.firstChapterUrl}`
-    );
-    resolved = {
-      chapterUrl: selectedMatch.candidate.firstChapterUrl,
-      matchedTitle: selectedMatch.candidate.title
-    };
-  }
-  if (!resolved?.chapterUrl) {
-    resolved = await withTimeoutValue(
-      resolveFirstManhwaZoneChapterFromSeriesUrl(
-        selectedMatch.candidate.url,
-        selectedMatch.candidate.title
-      ),
-      READ_NOW_SERIES_RESOLVE_TIMEOUT_MS,
-      null
-    );
-  }
-  if (!resolved) {
-    return null;
-  }
-
-  return {
-    requestedTitle: queryTitles[0] ?? selectedMatch.queryTitle,
-    matchedTitle: resolved.matchedTitle,
-    seriesUrl: selectedMatch.candidate.url,
-    chapterUrl: resolved.chapterUrl,
-    sourceDomain: extractDomain(resolved.chapterUrl)
-  };
+  return null;
 }
 
 export async function resolveDirectReadNow(
@@ -1036,34 +968,53 @@ export async function resolveDirectReadNow(
 ): Promise<ReadNowResolution | null> {
   const queryTitles = buildReadNowTitleCandidates(titles);
   if (queryTitles.length === 0) {
+    console.log("[read-now] rejected reason=no-searchable-title");
     return null;
   }
 
-  const cacheKey = `${options.preferManhwa ? "manhwa" : "any"}:${queryTitles
-    .slice(0, READ_NOW_TITLE_VARIANT_LIMIT)
+  const cacheKey = `${options.source ?? "all"}:${options.malId ?? "unknown"}:${options.preferManhwa ? "manhwa" : "any"}:${queryTitles
+    .slice(0, 4)
     .map((title) => normalizeTitle(title))
     .join("|")}`;
   const cached = readNowCache.get(cacheKey);
   if (cached !== undefined) {
+    console.log(`[read-now] resolution cache-hit title=${JSON.stringify(queryTitles[0])}`);
     return cached;
   }
 
   const inFlight = inFlightReadNowResolutions.get(cacheKey);
   if (inFlight) {
+    console.log(`[read-now] joining in-flight title=${JSON.stringify(queryTitles[0])}`);
     return inFlight;
   }
 
-  const sourceTasks = options.preferManhwa
+  const unavailable = new Set<string>();
+  let stopped = false;
+  const resolveSource = (source: "weebcentral" | "manhwazone") => resolveSourceReadNowFromTitles(queryTitles, source, options.malId, unavailable, () => stopped);
+  const sourceTasks = options.source === "weebcentral"
+    ? [resolveSource("weebcentral")]
+    : options.source === "manhwazone"
+      ? [resolveSource("manhwazone")]
+      : options.preferManhwa
     ? [
-        resolveManhwaZoneReadNowFromTitles(queryTitles),
-        resolveWeebCentralReadNowFromTitles(queryTitles)
+        resolveSource("manhwazone"),
+        resolveSource("weebcentral")
       ]
     : [
-        resolveWeebCentralReadNowFromTitles(queryTitles),
-        resolveManhwaZoneReadNowFromTitles(queryTitles)
+        resolveSource("weebcentral"),
+        resolveSource("manhwazone")
       ];
 
-  const resolution = withTimeoutValue(firstNonNull(sourceTasks), READ_NOW_TIMEOUT_MS, null);
+  let finished = false;
+  const resolution = withTimeoutValue(firstNonNull(sourceTasks).then((result) => { finished = true; return result; }), READ_NOW_TIMEOUT_MS, null)
+    .then((result) => {
+      stopped = true;
+      if (!result && (!finished || unavailable.size > 0)) {
+        throw new ReadNowUnavailableError("A reading source is temporarily unavailable or took too long to respond. Please try again shortly, or paste a chapter URL.");
+      }
+      if (!result) console.log(`[read-now] not-found after searches title=${JSON.stringify(queryTitles[0])}`);
+      return result;
+    });
   inFlightReadNowResolutions.set(cacheKey, resolution);
 
   try {
@@ -1211,7 +1162,7 @@ function cleanTitle(raw: string): string {
   t = t.replace(/\s*[-–—]\s*(?:read|free|online|officially\s+licensed|ad\s+free|chapter\s*[\d.]+|vol\.?\s*\d+|manga|manhwa|manhua|comic|scan|scans|raw|official|licensed|era|velvet|asura).*$/i, "").trim();
 
   // Remove trailing " on [Site]" or " from [Site]"
-  t = t.replace(/\s+(?:on|from|at|via)\s+\S+\s*$/i, "").trim();
+  t = t.replace(/\s+(?:on|from|at|via)\s+(?:weebcentral|manhwazone|mangadex|mangakatana|[\w.-]+\.(?:com|net|org|to))\s*$/i, "").trim();
 
   // Remove parenthesized or bracketed qualifiers like "(Volume)", "(Color)", "[OFFICIAL]"
   t = t.replace(/\s*[\[(](?:volume|vol\.?|color(?:ed)?|colou?red|official|licensed|english|raw|chapter\s*[\d.]+)[^\])]*[\])]/gi, "").trim();

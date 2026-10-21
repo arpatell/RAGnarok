@@ -1,60 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import type { Bookmark, ChapterListItem, IngestResponse, SuggestionsPayload } from "../types";
-
-const KOFI_URL = "https://ko-fi.com/phos174";
-
-interface CryptoWallet {
-  id: string;
-  label: string;
-  icon: string;
-  address: string;
-}
-
-const CRYPTO_WALLETS: CryptoWallet[] = [
-  {
-    id: "sol",
-    label: "SOL",
-    icon: "SOL",
-    address: "8Vs3NX3pN7M7CjmgM6tENgef1LfJLHkWLn6SK3oPEX9r"
-  },
-  {
-    id: "eth",
-    label: "ETH",
-    icon: "ETH",
-    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
-  },
-  {
-    id: "btc",
-    label: "BTC",
-    icon: "BTC",
-    address: "bc1p2l627u3gwyj55pnpn4pkrehvvrlwm6y74cnx006ztdnkut6vhtns0fy2c8"
-  },
-  {
-    id: "base",
-    label: "BASE",
-    icon: "BASE",
-    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
-  },
-  {
-    id: "monad",
-    label: "MONAD",
-    icon: "MON",
-    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
-  },
-  {
-    id: "sui",
-    label: "SUI",
-    icon: "SUI",
-    address: "0xbe1bb13a1bbe47a5948c9c190d32dc70984fffd43fc128428fe67ac3dc11c4ba"
-  },
-  {
-    id: "polygon",
-    label: "POLYGON",
-    icon: "POLY",
-    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
-  }
-];
+import { CryptoWalletList, type CryptoWallet } from "./CryptoWalletList";
+import support from "../lib/support.json";
 
 interface ChapterSidebarProps {
   isOpen: boolean;
@@ -245,27 +193,7 @@ export function ChapterSidebar({
           Send with crypto and include a message with your payment if you want to share feedback.
         </p>
 
-        <ul className="coffee-wallet-list" aria-label="Crypto wallet addresses">
-          {CRYPTO_WALLETS.map((wallet) => (
-            <li key={wallet.id} className="coffee-wallet-item">
-              <div className="wallet-network">
-                <span className="wallet-icon" aria-hidden="true">{wallet.icon}</span>
-                <strong>{wallet.label}</strong>
-              </div>
-              <div className="coffee-address-row wallet-address-row">
-                <input type="text" readOnly value={wallet.address} aria-label={`${wallet.label} address`} />
-                <button
-                  type="button"
-                  onClick={() => {
-                    void copyCryptoAddress(wallet);
-                  }}
-                >
-                  Copy
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <CryptoWalletList onCopy={(wallet) => { void copyCryptoAddress(wallet); }} />
 
         {cryptoCopyStatus ? <p className="muted">{cryptoCopyStatus}</p> : null}
         <button type="button" className="ghost" onClick={() => setCryptoOpen(false)}>
@@ -366,7 +294,7 @@ export function ChapterSidebar({
           <h3>Suggestions</h3>
 
           <div className="suggestion-group">
-            <h4>Jikan Recommendations</h4>
+            <h4>You May Also Like</h4>
             {suggestions.similarSeries.length ? (
               <ul>
                 {suggestions.similarSeries.map((series) => (
@@ -383,7 +311,7 @@ export function ChapterSidebar({
                 ))}
               </ul>
             ) : (
-              <p className="muted">No Jikan recommendations found.</p>
+              <p className="muted">No recommendations available yet.</p>
             )}
           </div>
         </section>
@@ -406,7 +334,7 @@ export function ChapterSidebar({
           {coffeeOpen ? (
             <div className="coffee-panel">
               <div className="coffee-actions">
-                <a className="ghost" href={KOFI_URL} target="_blank" rel="noreferrer">
+                <a className="ghost" href={support.kofiUrl} target="_blank" rel="noreferrer">
                   Ko-fi
                 </a>
                 <button

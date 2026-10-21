@@ -70,7 +70,7 @@ const ADAPTERS: Adapter[] = [
     selectors: {
       title: ["h1", "meta[property='og:title']", "title"],
       cover: ["meta[property='og:image']", ".cover img", ".poster img", "img[alt*='cover' i]"],
-      chapterTitle: ["h1", ".chapter-title", "title"],
+      chapterTitle: [".chapter-title", "title", "h1"],
       chapterLinks: ["ol[aria-label='List of chapters'] li a", "a[aria-label^='Read Episode']", "a[href^='/preview/']"],
       panel: ["main img", "article img", ".chapter-content img", ".reader img", ".prose img", "img[src]"],
       genres: ["a[href*='/genre']", "a[href*='/tag']", ".genres a"],

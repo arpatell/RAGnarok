@@ -8,6 +8,9 @@ import {
   searchMangaRagStream
 } from "../lib/api";
 import type { FavoriteEntry, HistoryEntry, RagSearchResult } from "../types";
+import { CryptoWalletList } from "./CryptoWalletList";
+import support from "../lib/support.json";
+import { toDisplayTypeLabel } from "../lib/mediaLabels";
 
 interface HomeScreenProps {
   initialUrl: string;
@@ -22,56 +25,10 @@ interface HomeScreenProps {
 type InputMode = "smart" | "url";
 type LibraryTab = "recents" | "favorites";
 
-const KOFI_URL = "https://ko-fi.com/phos174";
 const LIVE_META_RETRY_WINDOW_MS = 5_000;
 const LIVE_META_MAX_CARDS = 4;
 const LIVE_META_RETRY_PASS_DELAY_MS = 2_500;
 const LIVE_META_BETWEEN_CARD_DELAY_MS = 250;
-
-const CRYPTO_WALLETS = [
-  {
-    id: "sol",
-    label: "SOL",
-    icon: "SOL",
-    address: "8Vs3NX3pN7M7CjmgM6tENgef1LfJLHkWLn6SK3oPEX9r"
-  },
-  {
-    id: "eth",
-    label: "ETH",
-    icon: "ETH",
-    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
-  },
-  {
-    id: "btc",
-    label: "BTC",
-    icon: "BTC",
-    address: "bc1p2l627u3gwyj55pnpn4pkrehvvrlwm6y74cnx006ztdnkut6vhtns0fy2c8"
-  },
-  {
-    id: "base",
-    label: "BASE",
-    icon: "BASE",
-    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
-  },
-  {
-    id: "monad",
-    label: "MONAD",
-    icon: "MON",
-    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
-  },
-  {
-    id: "sui",
-    label: "SUI",
-    icon: "SUI",
-    address: "0xbe1bb13a1bbe47a5948c9c190d32dc70984fffd43fc128428fe67ac3dc11c4ba"
-  },
-  {
-    id: "polygon",
-    label: "POLYGON",
-    icon: "POLY",
-    address: "0x0b41B491E96cc626E009BAdDA83d535A94Ab4a85"
-  }
-];
 
 function toSeriesKey(value: string): string {
   return value.trim().toLowerCase();
@@ -107,26 +64,6 @@ function getPrimaryWatchOptionUrl(result: RagSearchResult): string | null {
   }
 
   return null;
-}
-
-function toDisplayTypeLabel(result: RagSearchResult): string {
-  const mediaType = (result.media_type || "").trim().toLowerCase();
-  const displayType = (result.display_type || "").trim();
-
-  if (mediaType === "anime") {
-    const subtype = !displayType || displayType.toLowerCase() === "anime" ? "TV" : displayType;
-    return `Anime (${subtype})`;
-  }
-
-  if (displayType) {
-    return displayType;
-  }
-
-  if (mediaType === "manga") {
-    return "Manga";
-  }
-
-  return "Manga";
 }
 
 function isAnimeResult(result: RagSearchResult): boolean {
@@ -198,13 +135,19 @@ export function HomeScreen({
   } | null>(null);
   const [isSmartSearching, setIsSmartSearching] = useState(false);
   const [smartError, setSmartError] = useState<string | null>(null);
+  const [smartStatus, setSmartStatus] = useState<string | null>(null);
+  useEffect(() => {
+    if (!smartStatus || isSmartSearching) return;
+    const timer = window.setTimeout(() => setSmartStatus(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [smartStatus, isSmartSearching]);
   const [hasSmartSearched, setHasSmartSearched] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportShowCrypto, setSupportShowCrypto] = useState(false);
   const [supportCopyStatus, setSupportCopyStatus] = useState<string | null>(null);
 
   const [readNowLoadingKey, setReadNowLoadingKey] = useState<string | null>(null);
-  const [readNowError, setReadNowError] = useState<string | null>(null);
+  const [readNowError, setReadNowError] = useState<{ key: string; message: string } | null>(null);
   const readNowAbortRef = useRef<AbortController | null>(null);
   const liveMetaAbortRef = useRef<AbortController | null>(null);
 
@@ -249,6 +192,7 @@ export function HomeScreen({
     setHasSmartSearched(true);
     setSmartError(null);
     setReadNowError(null);
+    setSmartStatus(null);
 
     try {
       const payload = await searchMangaRagStream(
@@ -265,8 +209,10 @@ export function HomeScreen({
           setSmartHighlight(streamedPayload.highlight);
           setHasSmartSearched(true);
         },
-        controller.signal
+        controller.signal,
+        (message) => { if (!controller.signal.aborted) setSmartStatus(message); }
       );
+      if (!controller.signal.aborted) setSmartStatus(payload.notice || null);
       const topResults = payload.results.slice(0, 10);
       const mediaTypeFilter = parseAppendedMediaTypeFilter(query);
       setSmartResults(topResults);
@@ -370,6 +316,7 @@ export function HomeScreen({
       })();
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
+      setSmartStatus(null);
       setSmartError(err instanceof Error ? err.message : "Smart Search failed. Try again.");
     } finally {
       setIsSmartSearching(false);
@@ -381,7 +328,7 @@ export function HomeScreen({
       const key = `${result.title}-${result.mal_id ?? "na"}`;
       const title = result.title.trim();
       if (!title) {
-        setReadNowError("Could not start reading because this result has no title.");
+        setReadNowError({ key, message: "Could not start reading because this result has no title." });
         return;
       }
 
@@ -397,7 +344,8 @@ export function HomeScreen({
           title,
           titleCandidates,
           controller.signal,
-          [result.media_type, result.display_type, ...result.genres].filter(Boolean).join(" ")
+          [result.media_type, result.display_type, ...result.genres].filter(Boolean).join(" "),
+          result.mal_id
         );
         const chapterUrl = resolved.chapterUrl.trim();
         if (!chapterUrl) {
@@ -414,8 +362,7 @@ export function HomeScreen({
           error instanceof Error && error.message.trim().length > 0
             ? error.message
             : `We couldn't find "${title}" on WeebCentral or ManhwaZone. Try searching online for a dedicated website hosting this manga/manhwa and paste a chapter link into the Paste URL option above.`;
-        setReadNowError(message);
-        onNotify(message);
+        setReadNowError({ key, message });
       } finally {
         setReadNowLoadingKey((current) => (current === key ? null : current));
       }
@@ -491,7 +438,7 @@ export function HomeScreen({
           don&rsquo;t forget to leave any feedback or ideas.
         </p>
         <div className="home-support-modal-actions">
-          <a className="primary" href={KOFI_URL} target="_blank" rel="noreferrer">
+          <a className="primary" href={support.kofiUrl} target="_blank" rel="noreferrer">
             Ko-fi
           </a>
           <button
@@ -507,27 +454,7 @@ export function HomeScreen({
           </button>
         </div>
         {supportShowCrypto ? (
-          <ul className="coffee-wallet-list" aria-label="Crypto wallet addresses">
-            {CRYPTO_WALLETS.map((wallet) => (
-              <li key={wallet.id} className="coffee-wallet-item">
-                <div className="wallet-network">
-                  <span className="wallet-icon" aria-hidden="true">{wallet.icon}</span>
-                  <strong>{wallet.label}</strong>
-                </div>
-                <div className="coffee-address-row wallet-address-row">
-                  <input type="text" readOnly value={wallet.address} aria-label={`${wallet.label} address`} />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void copyCryptoAddress(wallet.label, wallet.address);
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <CryptoWalletList onCopy={(wallet) => { void copyCryptoAddress(wallet.label, wallet.address); }} />
         ) : null}
         {supportCopyStatus ? <p className="muted">{supportCopyStatus}</p> : null}
         <button type="button" className="ghost" onClick={() => setSupportOpen(false)}>
@@ -638,9 +565,12 @@ export function HomeScreen({
                 </div>
                 <div>
                   <p>Searching...</p>
-                  <small>Matching titles, plots, and aliases.</small>
+                  <small>{smartStatus || "Matching titles, plots, and aliases."}</small>
                 </div>
               </div>
+            ) : null}
+            {!isSmartSearching && smartStatus ? (
+              <p className="muted search-empty" role="status" aria-live="polite">{smartStatus}</p>
             ) : null}
             {smartError && !isSmartSearching ? (
               <p className="muted search-empty">{smartError}</p>
@@ -722,9 +652,11 @@ export function HomeScreen({
                             type="button"
                             className="search-result-read-btn"
                             disabled={isReadNowLoading}
+                            aria-busy={isReadNowLoading}
                             onClick={() => handleReadNow(result)}
                           >
-                            {isReadNowLoading ? "Loading..." : "Read Now"}
+                            {isReadNowLoading ? <span className="read-now-spinner" aria-hidden="true" /> : null}
+                            {isReadNowLoading ? "Searching..." : "Read Now"}
                           </button>
                         ) : null}
                         {watchUrl ? (
@@ -738,15 +670,13 @@ export function HomeScreen({
                           </a>
                         ) : null}
                       </div>
+                      {readNowError?.key === resultKey ? (
+                        <p className="search-read-now-error" role="alert">{readNowError.message}</p>
+                      ) : null}
                     </article>
                     );
                   })}
                 </div>
-                {readNowError ? (
-                  <p className="search-read-now-error" role="alert">
-                    {readNowError}
-                  </p>
-                ) : null}
               </>
             ) : null}
           </section>

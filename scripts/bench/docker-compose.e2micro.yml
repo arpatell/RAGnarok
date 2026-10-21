@@ -10,7 +10,8 @@
 #   docker compose -f scripts/bench/docker-compose.e2micro.yml up --build
 #
 # Memory budget mirrors production: 1GB RAM ceiling + 4GB swap headroom split
-# across backend (Node) and rag (Python). CPU capped at 0.5 cores total.
+# across backend (Node) and rag (Python). CPU capped at 0.25 cores total,
+# matching the sustained fractional CPU allocation rather than the 2 exposed vCPUs.
 
 services:
   backend:
@@ -19,7 +20,7 @@ services:
       dockerfile: scripts/bench/Dockerfile.backend
     mem_limit: 384m
     memswap_limit: 2304m
-    cpus: 0.3
+    cpus: 0.10
     environment:
       PORT: "8787"
       RAG_API_URL: http://rag:8090/rag/search
@@ -35,7 +36,7 @@ services:
       dockerfile: scripts/bench/Dockerfile.rag
     mem_limit: 640m
     memswap_limit: 2688m
-    cpus: 0.2
+    cpus: 0.15
     environment:
       PINECONE_API_KEY: ${PINECONE_API_KEY:-}
       PINECONE_INDEX: ${PINECONE_INDEX:-}

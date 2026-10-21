@@ -262,6 +262,7 @@ export interface RagResultLiveMetaPayload {
 }
 
 export interface RagSearchPayload {
+  notice?: string | null;
   query: string;
   answer: string;
   retrieval_mode: string;

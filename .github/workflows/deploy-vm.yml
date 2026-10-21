@@ -29,6 +29,7 @@ jobs:
       DEPLOY_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
       DEPLOY_REPO_PATH: ${{ secrets.GCP_REPO_PATH }}
       DEPLOY_REF: ${{ inputs.ref || github.event.workflow_run.head_sha || github.sha }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
 
     steps:
       - name: Validate deploy secrets
@@ -49,8 +50,9 @@ jobs:
 
       - name: Deploy to VM
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DEPLOY_REPO_PATH='$DEPLOY_REPO_PATH' DEPLOY_REF='$DEPLOY_REF' bash -s" <<'EOF'
+          {
+          printf '%s\n' "$(printf '%s' "$GROQ_API_KEY" | base64 -w0)"
+          cat <<'EOF'
           set -euo pipefail
 
           DEPLOY_REPO_REAL_PATH="$(realpath "$DEPLOY_REPO_PATH")"
@@ -67,15 +69,23 @@ jobs:
           git fetch --prune origin
           git checkout --detach "$DEPLOY_REF"
 
+          if [ -n "$GROQ_KEY_BASE64" ]; then
+            printf '%s' "$GROQ_KEY_BASE64" | sudo python3 scripts/gcp/configure-groq.py
+          else
+            echo "::warning::GROQ_API_KEY not supplied; existing VM provider configuration left unchanged."
+          fi
+          unset GROQ_KEY_BASE64
+
           npm run build --workspace @panelflow/backend
 
-          if [ -x .venv/bin/python ]; then
-            PY=.venv/bin/python
-          else
-            PY=python3
+          # Match the interpreter selected by rag/start-rag.sh.
+          if [ ! -x .venv/bin/python ]; then
+            python3 -m venv .venv
           fi
+          PY="$DEPLOY_REPO_REAL_PATH/.venv/bin/python"
           "$PY" -m pip install --quiet --upgrade pip
           "$PY" -m pip install --quiet -r rag/requirements.txt
+          "$PY" -c 'import sys; from fastembed import TextEmbedding; import rag.rag_api; print("RAG runtime imports verified:", sys.executable)'
 
           sudo systemctl restart ragnarok-rag.service
 
@@ -119,3 +129,7 @@ jobs:
             exit 1
           fi
           EOF
+          } | ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "IFS= read -r GROQ_KEY_BASE64
+             export GROQ_KEY_BASE64
+             DEPLOY_REPO_PATH='$DEPLOY_REPO_PATH' DEPLOY_REF='$DEPLOY_REF' bash -s"

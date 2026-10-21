@@ -937,6 +937,18 @@ button:disabled {
   gap: 0.42rem;
 }
 
+.wallet-qr {
+  display: block;
+  width: 180px;
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  justify-self: center;
+  background: #789e94;
+  border-radius: 8px;
+  image-rendering: pixelated;
+}
+
 .wallet-network strong {
   font-size: 0.8rem;
   letter-spacing: 0.05em;
@@ -2063,6 +2075,11 @@ button:disabled {
 }
 
 .search-result-read-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 36px;
   width: 100%;
   padding: 0.52rem 0;
   background: linear-gradient(120deg, var(--accent) 0%, #f9c57c 100%);
@@ -2073,6 +2090,25 @@ button:disabled {
   border: 0;
   cursor: pointer;
   transition: opacity 140ms ease, transform 120ms ease;
+}
+
+.read-now-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 680ms linear infinite;
+}
+
+.search-result-read-btn:disabled {
+  cursor: progress;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .read-now-spinner { animation-duration: 1800ms; }
 }
 
 .search-result-read-btn:hover {

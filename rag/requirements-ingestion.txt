@@ -16,3 +16,4 @@ langgraph==0.2.70
 pandas==2.2.3
 pyarrow==20.0.0
 tqdm==4.67.1
+korean-romanizer==0.28.0

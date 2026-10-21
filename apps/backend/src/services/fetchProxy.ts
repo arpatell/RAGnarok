@@ -11,6 +11,8 @@ const USER_AGENTS = [
 
 const htmlCache = new LRUCache<string, FetchResult>({
   max: 500,
+  maxSize: 24 * 1024 * 1024,
+  sizeCalculation: (value) => Buffer.byteLength(value.html, "utf8") + 256,
   ttl: HTML_CACHE_TTL_MS
 });
 
@@ -32,25 +34,28 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function fetchChapterHtml(url: string): Promise<FetchResult> {
+export async function fetchChapterHtml(url: string, options: { timeoutMs?: number; maxAttempts?: number } = {}): Promise<FetchResult> {
   const cached = htmlCache.get(url);
   if (cached) {
     return cached;
   }
 
-  const existingInFlight = inFlightFetches.get(url);
+  const timeoutMs = options.timeoutMs ?? FETCH_TIMEOUT_MS;
+  const maxAttempts = options.maxAttempts ?? 2;
+  const requestKey = `${url}:${timeoutMs}:${maxAttempts}`;
+  const existingInFlight = inFlightFetches.get(requestKey);
   if (existingInFlight) {
     return existingInFlight;
   }
 
   const requestPromise = (async () => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       let lastResult: FetchResult | null = null;
 
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const response = await fetch(url, {
           redirect: "follow",
           signal: controller.signal,
@@ -80,7 +85,7 @@ export async function fetchChapterHtml(url: string): Promise<FetchResult> {
           return result;
         }
 
-        if (attempt === 0) {
+        if (attempt + 1 < maxAttempts) {
           await delay(200);
         }
       }
@@ -100,11 +105,11 @@ export async function fetchChapterHtml(url: string): Promise<FetchResult> {
     }
   })();
 
-  inFlightFetches.set(url, requestPromise);
+  inFlightFetches.set(requestKey, requestPromise);
 
   try {
     return await requestPromise;
   } finally {
-    inFlightFetches.delete(url);
+    inFlightFetches.delete(requestKey);
   }
 }

@@ -1,9 +1,10 @@
 import { IngestError } from "../errors.js";
+import { LRUCache } from "lru-cache";
 
 const DEFAULT_RAG_API_URL = "http://127.0.0.1:8090/rag/search";
 const DEFAULT_TOP_K = 10;
 const REQUEST_TIMEOUT_MS = Number.parseInt(
-  process.env.RAG_REQUEST_TIMEOUT_MS ?? "8000",
+  process.env.RAG_REQUEST_TIMEOUT_MS ?? "32000",
   10,
 );
 const MAL_BASE_URL = "https://api.myanimelist.net/v2";
@@ -32,10 +33,10 @@ const malTitleAliasCache = new Map<
   string,
   { expiresAt: number; value: TitleAliasCandidate[] }
 >();
-const ragResponseCache = new Map<
+const ragResponseCache = new LRUCache<
   string,
   { expiresAt: number; value: RagSearchResponse }
->();
+>({ max: Math.max(1, RAG_RESPONSE_CACHE_MAX), maxSize: 4 * 1024 * 1024, sizeCalculation: (entry) => Math.max(1, Buffer.byteLength(JSON.stringify(entry.value), "utf8")) });
 const inFlightRagSearches = new Map<string, Promise<RagSearchResponse>>();
 const inFlightMalTitleAliasFetches = new Map<
   string,
@@ -53,9 +54,13 @@ interface RemoteRagResult {
   snippet?: string;
   score?: number;
   citation?: string;
+  media_type?: string;
+  title_candidates?: string[];
+  image_url?: string | null;
 }
 
 interface RemoteRagPayload {
+  notice?: string | null;
   query?: string;
   answer?: string;
   retrieval_mode?: string;
@@ -106,6 +111,7 @@ export interface RagSearchResult {
 }
 
 export interface RagSearchResponse {
+  notice?: string | null;
   query: string;
   answer: string;
   retrieval_mode: string;
@@ -246,7 +252,7 @@ function setCachedRagResponse(
   }
 
   ragResponseCache.set(cacheKey, {
-    expiresAt: Date.now() + RAG_RESPONSE_CACHE_TTL_MS,
+    expiresAt: Date.now() + (value.notice ? Math.min(5000, RAG_RESPONSE_CACHE_TTL_MS) : RAG_RESPONSE_CACHE_TTL_MS),
     value: cloneRagResponse(value),
   });
 }
@@ -729,6 +735,8 @@ function parseMediaTypeFromSnippet(snippet: string): JikanMediaType | null {
 }
 
 function parseDisplayTypeFromSnippet(snippet: string): string | null {
+  const format = snippet.match(/\bDetails:\s*Format:\s*([^;\n]+)/i)?.[1]?.trim();
+  if (format) return format.replace(/_/g, " ");
   const extracted = extractSnippetSection(snippet, "type:", [
     "title:",
     "synopsis:",
@@ -917,7 +925,7 @@ function extractCharactersFromSnippet(snippet: string): string[] {
   return characters;
 }
 
-async function callHybridRagService(query: string): Promise<RemoteRagPayload> {
+async function callHybridRagService(query: string, mediaTypeFilter: JikanMediaType | null = null): Promise<RemoteRagPayload> {
   const raw = process.env.RAG_API_URL?.trim();
   const target = raw && raw.length > 0 ? raw : DEFAULT_RAG_API_URL;
 
@@ -930,7 +938,7 @@ async function callHybridRagService(query: string): Promise<RemoteRagPayload> {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, media_type: mediaTypeFilter }),
     });
   } catch (error) {
     const base = error instanceof Error ? error.message : String(error);
@@ -1039,7 +1047,7 @@ async function searchMangaRagSingleUncached(
   normalized: string,
   mediaTypeFilter: JikanMediaType | null = null,
 ): Promise<RagSearchResponse> {
-  const remote = await callHybridRagService(normalized);
+  const remote = await callHybridRagService(normalized, mediaTypeFilter);
   const remoteAnswer = cleanText(remote.answer);
   const remoteResults = normalizeRemoteResults(remote).slice(0, DEFAULT_TOP_K);
   const enrichedResults: RagSearchResult[] = [];
@@ -1048,7 +1056,7 @@ async function searchMangaRagSingleUncached(
     const fallbackTitle = cleanText(row.title) || "Unknown";
     const malId = safeNumber(row.mal_id);
     const snippet = cleanText(row.snippet);
-    const preferredMediaType = parseMediaTypeFromSnippet(snippet);
+    const preferredMediaType = row.media_type === "anime" || row.media_type === "manga" ? row.media_type : parseMediaTypeFromSnippet(snippet);
     const title = fallbackTitle;
     const citation = buildCitation(malId, title);
     const mediaType = preferredMediaType ?? "unknown";
@@ -1059,10 +1067,14 @@ async function searchMangaRagSingleUncached(
       "No synopsis available.";
     const characters = extractCharactersFromSnippet(snippet);
     const genres = extractGenresFromSnippet(snippet);
+    if (genres.some((genre) => /^(?:boys love|girls love|erotica|hentai)$/i.test(genre))) {
+      continue;
+    }
     const source: ResultSource = "pinecone";
 
     enrichedResults.push({
       title,
+      title_candidates: row.title_candidates,
       media_type: mediaType,
       display_type: displayType,
       mal_id: malId,
@@ -1073,7 +1085,7 @@ async function searchMangaRagSingleUncached(
       score: safeNumber(row.score),
       source,
       source_label: toSourceLabel(),
-      image_url: null,
+      image_url: cleanText(row.image_url) || null,
       status: null,
       chapters: null,
       volumes: null,
@@ -1093,7 +1105,7 @@ async function searchMangaRagSingleUncached(
     : enrichedResults;
   const first = filteredResults[0] ?? null;
   const highlightImageUrl = cleanText(remote.highlight?.image_url) || null;
-  if (first && !first.image_url && highlightImageUrl) {
+  if (first && !first.image_url && highlightImageUrl && safeNumber(remote.highlight?.mal_id) === first.mal_id) {
     first.image_url = highlightImageUrl;
   }
   const highlight =
@@ -1135,12 +1147,13 @@ async function searchMangaRagSingleUncached(
       : cleanText(remote.retrieval_mode) || "hybrid_cache",
     results: filteredResults,
     highlight,
+    notice: cleanText(remote.notice) || null,
   };
 }
 
 function resultMergeKey(result: RagSearchResult): string {
   if (result.mal_id !== null) {
-    return `mal:${result.mal_id}`;
+    return `${result.media_type}:mal:${result.mal_id}`;
   }
   return `title:${normalizeTitleForMatch(result.title)}`;
 }
@@ -1221,6 +1234,7 @@ function mergeRagResponses(
 
   return {
     query,
+    notice: entries.find((entry) => entry.response.notice)?.response.notice ?? null,
     answer:
       results.length > 0
         ? `Found ${results.length} strong matches${entries.length > 1 ? " using title aliases." : "."}`
@@ -1282,7 +1296,8 @@ export async function searchMangaRag(
     payload: primary,
   });
 
-  if (hasStrongPrimaryTitleMatch(normalized, primary)) {
+  const naturalDescription = searchQuery.split(/\s+/).length > 8 || /\b(?:remember|looking for|trying to|about|where|whose|named|character|finds|gets|becomes)\b/i.test(searchQuery);
+  if (primary.notice || naturalDescription || hasStrongPrimaryTitleMatch(searchQuery, primary)) {
     await options.onProgress?.({
       stage: "final",
       query: normalized,

@@ -94,16 +94,21 @@ export function relayImageUrl(url: string): string {
   return url;
 }
 
-export async function ingestChapter(url: string): Promise<IngestResponse> {
-  const response = await fetch(apiPath("/api/ingest"), {
+const pendingIngests = new Map<string, Promise<IngestResponse>>();
+
+export function ingestChapter(url: string): Promise<IngestResponse> {
+  const key = url.trim();
+  const existing = pendingIngests.get(key);
+  if (existing) return existing;
+  const pending = fetch(apiPath("/api/ingest"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ url }),
-  });
-
-  return parseJson<IngestResponse>(response);
+    body: JSON.stringify({ url: key }),
+  }).then(parseJson<IngestResponse>).finally(() => pendingIngests.delete(key));
+  pendingIngests.set(key, pending);
+  return pending;
 }
 
 export async function fetchSupportedAdapters(): Promise<SupportedAdapter[]> {
@@ -165,6 +170,7 @@ export async function searchMangaRagStream(
   query: string,
   onUpdate: (payload: RagSearchPayload) => void,
   signal?: AbortSignal,
+  onStatus?: (message: string) => void,
 ): Promise<RagSearchPayload> {
   const baseUrl = apiPath(
     `/api/rag/search/stream?q=${encodeURIComponent(query)}`,
@@ -204,6 +210,7 @@ export async function searchMangaRagStream(
       payload?: RagSearchPayload;
       error?: string;
       code?: string;
+      message?: string;
     };
     try {
       event = JSON.parse(trimmed);
@@ -212,6 +219,10 @@ export async function searchMangaRagStream(
       return;
     }
 
+    if (event.type === "status") {
+      if (event.message) onStatus?.(event.message);
+      return;
+    }
     if (event.type === "result" || event.type === "done") {
       if (event.payload) {
         latest = event.payload;
@@ -449,6 +460,7 @@ export async function resolveReadNowByTitle(
   titleCandidates: string[] = [],
   signal?: AbortSignal,
   mediaType?: string,
+  malId?: number | null,
 ): Promise<ReadNowPayload> {
   const latinCandidates = [title, ...titleCandidates].filter(
     isLatinReadableTitle,
@@ -460,6 +472,7 @@ export async function resolveReadNowByTitle(
   if (mediaType?.trim()) {
     params.set("media_type", mediaType.trim());
   }
+  if (malId) params.set("mal_id", String(malId));
 
   const response = await fetchWith304Bust(
     `/api/read-now?${params.toString()}`,
