@@ -1,11 +1,9 @@
 name: Deploy VM
 
 on:
-  workflow_run:
-    workflows:
-      - RAG Golden
-    types:
-      - completed
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       ref:
@@ -18,8 +16,52 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+    env:
+      RAG_LLM_RERANK_ENABLED: "0"
+      RAG_TITLE_JIKAN_FALLBACK: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Pin tested revision
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: rag/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install -r rag/requirements.txt
+          npm ci
+
+      - name: Check offline RAG contracts and real SDK initialization
+        run: python -m unittest rag.eval.test_search_contracts rag.eval.test_character_and_groq rag.eval.test_full_enrichment rag.eval.test_bulk_enrichment rag.eval.test_service_readiness rag.eval.test_first_request -v
+
+      - name: Check service lifecycle
+        run: python -m unittest discover -s scripts/gcp/tests -v
+
+      - name: Check backend
+        run: |
+          npm run build --workspace @panelflow/backend
+          node --import tsx --test apps/backend/src/services/*.test.ts apps/backend/src/adapters/*.test.ts
+
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -28,7 +70,7 @@ jobs:
       DEPLOY_PORT: ${{ secrets.GCP_SSH_PORT || '22' }}
       DEPLOY_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
       DEPLOY_REPO_PATH: ${{ secrets.GCP_REPO_PATH }}
-      DEPLOY_REF: ${{ inputs.ref || github.event.workflow_run.head_sha || github.sha }}
+      DEPLOY_REF: ${{ needs.preflight.outputs.sha }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
 
     steps:
@@ -86,6 +128,8 @@ jobs:
           "$PY" -m pip install --quiet --upgrade pip
           "$PY" -m pip install --quiet -r rag/requirements.txt
           "$PY" -c 'import sys; from fastembed import TextEmbedding; import rag.rag_api; print("RAG runtime imports verified:", sys.executable)'
+          # Exercise the real SDK factory in this exact runtime before downtime.
+          "$PY" -m unittest rag.eval.test_first_request.TransportTests -v
 
           sudo -n bash scripts/gcp/restart-services.sh
           EOF

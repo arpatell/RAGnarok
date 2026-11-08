@@ -24,7 +24,6 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pinecone import Pinecone
-from pinecone.config.openapi import OpenApiConfigFactory
 from pinecone_text.sparse import BM25Encoder
 from pydantic import BaseModel, Field, PrivateAttr, SecretStr
 from typing import Literal
@@ -823,10 +822,10 @@ class HybridRagService:
         )
 
         self._pc = Pinecone(api_key=pinecone_api_key)
-        # This SDK version otherwise retries beneath the application's deadline.
-        transport_config = OpenApiConfigFactory.build(api_key=pinecone_api_key)
-        transport_config.retries = 0
-        self._index = self._pc.Index(config.pinecone_index, openapi_config=transport_config)
+        # The SDK factory copies this configuration into the index transport.
+        # Passing openapi_config to Index() would duplicate its internal argument.
+        self._pc.openapi_config.retries = 0
+        self._index = self._pc.Index(config.pinecone_index)
 
         bm25 = BM25Encoder()
         loaded_bm25 = bm25.load(config.bm25_values_path)

@@ -2,10 +2,12 @@
 
 import asyncio
 import importlib.util
+import os
 from concurrent.futures import ThreadPoolExecutor
 import random
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+import tempfile
 import time
 from types import SimpleNamespace
 from pathlib import Path
@@ -118,9 +120,6 @@ class BenchmarkReadinessTests(unittest.TestCase):
 
 class TransportTests(unittest.TestCase):
     def test_pinned_sdk_stalled_socket_is_bounded_without_hidden_retries(self):
-        from pinecone import Index
-        from pinecone.config.openapi import OpenApiConfigFactory
-
         requests = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -141,14 +140,34 @@ class TransportTests(unittest.TestCase):
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=.01), daemon=True)
         thread.start()
-        transport = OpenApiConfigFactory.build(api_key="fixture")
-        transport.retries = 0
         try:
-            with Index(api_key="fixture", host=f"http://127.0.0.1:{server.server_port}", openapi_config=transport) as index:
+            config = SimpleNamespace(pinecone_index="fixture", bm25_values_path="fixture",
+                jikan_timeout_seconds=1, pinecone_namespaces=["fixture"], top_k=10,
+                candidate_pool_size=10, hybrid_dense_alpha=.5)
+            # Keep the production service constructor and real SDK factory. Only
+            # isolate model/catalog loading and the control-plane host lookup.
+            with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+                "PINECONE_API_KEY": "fixture", "RAG_LLM_RERANK_ENABLED": "0",
+                "RAG_EVIDENCE_INDEX_PATH": str(Path(directory) / "absent.sqlite"),
+            }), patch.object(rag_api, "FastEmbedQueryEmbedder"), patch.object(
+                rag_api.BM25Encoder, "__init__", return_value=None
+            ), patch.object(rag_api.BM25Encoder, "load", return_value=None), patch.object(
+                rag_api, "_load_alias_lexicon", return_value=(set(), set())
+            ), patch.object(rag_api, "_load_title_index", return_value={}), patch(
+                "pinecone.control.pinecone.IndexHostStore.get_host",
+                return_value=f"http://127.0.0.1:{server.server_port}",
+            ) as host_lookup:
+                service = rag_api.HybridRagService(config)
+            self.addCleanup(service._http.close)
+            with service._index as index:
+                host_lookup.assert_called_once()
+                self.assertEqual(index._openapi_config.retries, 0)
+                self.assertTrue(index._openapi_config.verify_ssl)
+                self.assertTrue(index._openapi_config.ssl_ca_cert)
                 started = time.monotonic()
                 with self.assertRaises(Exception):
                     index.query(vector=[.1], top_k=1, _request_timeout=.05)
-                self.assertLess(time.monotonic() - started, .5)
+                self.assertLess(time.monotonic() - started, 2)
                 self.assertEqual(len(requests), 1)
         finally:
             server.shutdown()

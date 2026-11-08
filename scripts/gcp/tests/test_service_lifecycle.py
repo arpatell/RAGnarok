@@ -57,6 +57,7 @@ printf '%s\\n' "curl $*" >> "$TRACE"
 if [ "${MODE:-}" = recover ] && [ ! -f "$STATE/restarted" ]; then exit 7; fi
 if [ "${MODE:-}" = unready ] && [ ! -f "$STATE/restarted" ]; then echo '{"status":"error"}'; exit 0; fi
 if [ "${MODE:-}" = external_restart ]; then touch "$STATE/external-restart"; exit 7; fi
+if [ "${MODE:-}" = startup_error ]; then echo '{"status":"error","detail":"fixture SDK initialization failed"}'; exit 0; fi
 if [ "${MODE:-}" = pending ] && [ ! -f "$STATE/probed" ]; then
   touch "$STATE/probed"; echo '{"initialized":false}'; exit 0
 fi
@@ -110,6 +111,14 @@ esac
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("restart ragnarok-backend", trace)
         self.assertIn("fresh diagnostic output", result.stdout)
+
+    def test_explicit_startup_error_fails_immediately_without_backend_restart(self):
+        result, trace = self.run_script("restart-services.sh", MODE="startup_error")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(trace.count("8090/health"), 1)
+        self.assertNotIn("restart ragnarok-backend", trace)
+        self.assertIn("fixture SDK initialization failed", result.stdout)
+        self.assertNotIn("Timed out", result.stdout)
 
     def test_restart_command_failure_prints_diagnostics(self):
         result, trace = self.run_script("restart-services.sh", MODE="restart_failure")

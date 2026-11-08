@@ -130,6 +130,18 @@ Data sources:
 - Pinecone for hybrid vector retrieval.
 - Public manga chapter pages for reader panel extraction.
 
+## VM Deployment
+
+Pushes to `main` automatically run **Deploy VM**. Its offline regression checks
+cover RAG contracts, real Pinecone SDK initialization, lifecycle scripts, and the
+backend tests/build before SSH deployment. The VM also checks the SDK constructor
+in its installed Python environment before restarting services. No new secrets
+or VM configuration are required.
+
+**RAG Golden** is manual-only and is not a deployment prerequisite. Commit without
+`[skip ci]` when you want automatic deployment; that marker skips GitHub's push
+workflows. **Deploy VM** can still be run manually, with an optional ref.
+
 ## Repository Layout
 
 - `apps/frontend` contains the React reader and discovery UI.

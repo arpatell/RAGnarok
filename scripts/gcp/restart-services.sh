@@ -26,7 +26,7 @@ diagnostics() {
 
 wait_ready() {
   local service="$1" url="$2" timeout="$3" kind="$4"
-  local deadline=$((SECONDS + timeout)) state
+  local deadline=$((SECONDS + timeout)) state probe_status
   while [ "$SECONDS" -lt "$deadline" ]; do
     state="$(systemctl is-active "${service}.service" 2>/dev/null || true)"
     if [ "$state" = "failed" ]; then
@@ -34,17 +34,26 @@ wait_ready() {
       diagnostics "$service"
       return 1
     fi
-    if curl -fsS --max-time 5 "$url" 2>/dev/null | python3 -c '
+    probe_status=0
+    curl -fsS --max-time 5 "$url" 2>/dev/null | python3 -c '
 import json, sys
 try:
     body = json.load(sys.stdin)
 except (ValueError, OSError):
     sys.exit(1)
+if sys.argv[1] == "rag" and isinstance(body, dict) and body.get("status") == "error":
+    print("RAG startup failed: " + str(body.get("detail", "Unknown initialization error")))
+    sys.exit(2)
 ready = isinstance(body, dict) and (body.get("initialized") in (True, "true") if sys.argv[1] == "rag" else body.get("ok") is True)
 sys.exit(0 if ready else 1)
-' "$kind"; then
+' "$kind" || probe_status=$?
+    if [ "$probe_status" -eq 0 ]; then
       echo "${service}.service is ready."
       return 0
+    fi
+    if [ "$probe_status" -eq 2 ]; then
+      diagnostics "$service"
+      return 1
     fi
     sleep 5
   done
