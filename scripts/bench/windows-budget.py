@@ -104,7 +104,10 @@ def wait_ready(url, processes, timeout=300):
             raise RuntimeError("A service exited under the resource budget; inspect benchmark logs")
         try:
             result = httpx.get(url, timeout=3)
-            if result.is_success and result.json().get("initialized", "true") == "true":
+            body = result.json()
+            if body.get("status") == "error":
+                raise RuntimeError(f"Service startup failed: {body.get('detail', 'unknown error')}")
+            if result.is_success and (body.get("initialized") in (True, "true") or body.get("ok") is True):
                 return round((time.perf_counter() - started) * 1000)
         except (httpx.HTTPError, ValueError):
             pass

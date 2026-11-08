@@ -16,6 +16,7 @@ from email.utils import parsedate_to_datetime
 from types import SimpleNamespace
 
 import httpx
+from rag.request_budget import remaining_seconds
 
 
 class RerankBusy(RuntimeError):
@@ -95,7 +96,10 @@ class GroqReranker:
         estimate = math.ceil(prompt_bytes / 3) + 768
         if prompt_bytes > 18000 or estimate > self.tpm:
             raise RerankBusy("Search context exceeds the current service allowance")
-        deadline = self.clock() + self.max_wait
+        allowance = remaining_seconds(self.max_wait, reserve=.25)
+        if allowance <= 0:
+            raise RerankBusy("Search deadline reached; using available matches")
+        deadline = self.clock() + allowance
         ticket = object()
         with self.condition:
             if len(self.queue) >= self.max_queue:
@@ -116,11 +120,18 @@ class GroqReranker:
                             break
                         self.condition.wait(min(remaining, max(.05, wait) if self.queue[0] is ticket else .25))
                 try:
+                    remaining = deadline - self.clock()
+                    if remaining <= .001:
+                        raise RerankBusy("Search deadline reached; using available matches")
+                    connect = min(2.0, remaining * .15)
+                    write = min(1.0, remaining * .10)
+                    pool = min(.5, remaining * .05)
+                    timeout = httpx.Timeout(connect=connect, write=write, pool=pool, read=min(8.0, remaining - connect - write - pool))
                     response = self.client.post("chat/completions", json={
                         "model": self.model, "messages": mapped, "temperature": 0,
                         "reasoning_effort": "low", "max_completion_tokens": 768,
                         "response_format": {"type": "json_object"},
-                    }, timeout=min(8.0, max(.1, deadline - self.clock())))
+                    }, timeout=timeout)
                 except httpx.TransportError:
                     if attempt == self.max_retries:
                         raise
@@ -136,6 +147,8 @@ class GroqReranker:
                         reservation.tokens = 0
                     elif response.status_code >= 500:
                         self.blocked_until = max(self.blocked_until, self.clock() + max(duration(response.headers.get("retry-after", "0")), 2 ** attempt + random.uniform(.05, .25)))
+                    if self.clock() >= deadline:
+                        raise RerankBusy("Search deadline reached; using available matches")
                 if response.is_success:
                     choice = payload["choices"][0]
                     content = choice["message"].get("content")

@@ -43,7 +43,10 @@ jobs:
         run: python -m py_compile rag/rag_api.py rag/eval/golden_top4000_pipeline.py
 
       - name: Validate search contracts
-        run: python -m unittest rag.eval.test_search_contracts rag.eval.test_character_and_groq rag.eval.test_full_enrichment rag.eval.test_bulk_enrichment -v
+        run: python -m unittest rag.eval.test_search_contracts rag.eval.test_character_and_groq rag.eval.test_full_enrichment rag.eval.test_bulk_enrichment rag.eval.test_service_readiness rag.eval.test_first_request -v
+
+      - name: Validate watchdog and deployment lifecycle
+        run: python -m unittest discover -s scripts/gcp/tests -v
 
       - name: Start RAG service
         run: |

@@ -44,7 +44,7 @@ case "$1" in
   show)
     case "$*" in
       *ExecMainStartTimestamp*)
-        if [ "${MODE:-}" = young ]; then date --iso-8601=seconds; else echo '2000-01-01 00:00:00 UTC'; fi;;
+        if [ "${MODE:-}" = young ] || [ -f "$STATE/external-restart" ]; then date --iso-8601=seconds; else echo '2000-01-01 00:00:00 UTC'; fi;;
       *) echo 'ActiveState=failed';;
     esac;;
   restart)
@@ -55,6 +55,8 @@ esac
         self.stub("curl", '''
 printf '%s\\n' "curl $*" >> "$TRACE"
 if [ "${MODE:-}" = recover ] && [ ! -f "$STATE/restarted" ]; then exit 7; fi
+if [ "${MODE:-}" = unready ] && [ ! -f "$STATE/restarted" ]; then echo '{"status":"error"}'; exit 0; fi
+if [ "${MODE:-}" = external_restart ]; then touch "$STATE/external-restart"; exit 7; fi
 if [ "${MODE:-}" = pending ] && [ ! -f "$STATE/probed" ]; then
   touch "$STATE/probed"; echo '{"initialized":false}'; exit 0
 fi
@@ -148,6 +150,16 @@ esac
         result, trace = self.run_script("rag-watchdog.sh", MODE="recover")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(trace.count("restart ragnarok-rag.service"), 1)
+
+    def test_watchdog_rejects_http_200_when_service_is_not_ready(self):
+        result, trace = self.run_script("rag-watchdog.sh", MODE="unready")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(trace.count("restart ragnarok-rag.service"), 1)
+
+    def test_watchdog_does_not_restart_a_process_restarted_during_probes(self):
+        result, trace = self.run_script("rag-watchdog.sh", MODE="external_restart")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("systemctl restart", trace)
 
 
 if __name__ == "__main__":

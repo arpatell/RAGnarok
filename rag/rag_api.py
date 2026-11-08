@@ -24,13 +24,16 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pinecone import Pinecone
+from pinecone.config.openapi import OpenApiConfigFactory
 from pinecone_text.sparse import BM25Encoder
 from pydantic import BaseModel, Field, PrivateAttr, SecretStr
 from typing import Literal
+from urllib3.exceptions import HTTPError as UpstreamTransportError
 
 from rag.catalog_policy import excluded_genres, extract_section
+from rag.request_budget import remaining_seconds, request_budget
 
-LOGGER = logging.getLogger("rag_api")
+LOGGER = logging.getLogger("uvicorn.error.rag")
 LOGGER.setLevel(logging.INFO)
 JIKAN_BASE_URL = "https://api.jikan.moe/v4"
 TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -135,6 +138,7 @@ JIKAN_RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 class RagSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=400)
     media_type: Literal["anime", "manga"] | None = None
+    budget_ms: int = Field(default=24000, ge=100, le=24000)
 
 
 class RagResult(BaseModel):
@@ -819,7 +823,10 @@ class HybridRagService:
         )
 
         self._pc = Pinecone(api_key=pinecone_api_key)
-        self._index = self._pc.Index(config.pinecone_index)
+        # This SDK version otherwise retries beneath the application's deadline.
+        transport_config = OpenApiConfigFactory.build(api_key=pinecone_api_key)
+        transport_config.retries = 0
+        self._index = self._pc.Index(config.pinecone_index, openapi_config=transport_config)
 
         bm25 = BM25Encoder()
         loaded_bm25 = bm25.load(config.bm25_values_path)
@@ -972,7 +979,7 @@ class HybridRagService:
         return f"[Source: MAL-ID {mal_id} - {title}]"
 
     @staticmethod
-    def _title_similarity(query_norm: str, alias_norm: str) -> float:
+    def _title_similarity(query_norm: str, alias_norm: str, *, minimum_score: float = 0.0) -> float:
         if not query_norm or not alias_norm:
             return 0.0
         if query_norm == alias_norm:
@@ -1002,10 +1009,6 @@ class HybridRagService:
         if query_loose == alias_loose:
             return 0.995
 
-        ratio = SequenceMatcher(None, query_norm, alias_norm).ratio()
-        loose_ratio = SequenceMatcher(None, query_loose, alias_loose).ratio()
-        best_ratio = max(ratio, loose_ratio)
-
         query_tokens = set(_tokens(query_norm))
         alias_tokens = set(_tokens(alias_norm))
         overlap = len(query_tokens.intersection(alias_tokens))
@@ -1022,17 +1025,25 @@ class HybridRagService:
             else 0.0
         )
 
-        score = (
-            (best_ratio * 0.60)
-            + (precision * 0.20)
-            + (recall * 0.10)
-            + (jaccard * 0.10)
-        )
-        if query_tokens and query_tokens.issubset(alias_tokens):
-            score += 0.05
-        if contains:
-            score = max(score, 0.86 + (0.12 * containment_ratio))
-        return min(1.0, score)
+        def score_for_ratio(ratio):
+            score = (ratio * 0.60) + (precision * 0.20) + (recall * 0.10) + (jaccard * 0.10)
+            if query_tokens and query_tokens.issubset(alias_tokens):
+                score += 0.05
+            if contains:
+                score = max(score, 0.86 + (0.12 * containment_ratio))
+            return min(1.0, score)
+
+        # Reject only candidates that cannot reach the caller's threshold even
+        # with a perfect sequence ratio; containment and typo rules stay intact.
+        if minimum_score > 0 and score_for_ratio(1.0) < minimum_score:
+            return 0.0
+        plain = SequenceMatcher(None, query_norm, alias_norm)
+        loose = SequenceMatcher(None, query_loose, alias_loose)
+        if minimum_score > 0:
+            upper = max(plain.quick_ratio(), loose.quick_ratio())
+            if score_for_ratio(upper) < minimum_score:
+                return 0.0
+        return score_for_ratio(max(plain.ratio(), loose.ratio()))
 
     def _title_candidates_from_jikan(
         self, query: str, query_norm: str
@@ -1180,7 +1191,7 @@ class HybridRagService:
                 alias_norm = _normalized_text(alias)
                 if not alias_norm:
                     continue
-                score = self._title_similarity(query_norm, alias_norm)
+                score = self._title_similarity(query_norm, alias_norm, minimum_score=self._title_match_threshold)
                 if score > best_score:
                     best_score = score
             if best_score >= self._title_match_threshold:
@@ -1259,12 +1270,16 @@ class HybridRagService:
         top_k: int,
         media_type: str | None = None,
     ) -> list[dict[str, Any]]:
+        timeout = remaining_seconds(max(0.1, _env_float("RAG_PINECONE_TIMEOUT_SECONDS", 5)), reserve=1)
+        if timeout <= 0:
+            raise TimeoutError("Search retrieval budget exhausted")
         response = self._index.query(
             namespace=namespace,
             vector=dense_query,
             **({"sparse_vector": sparse_query} if sparse_query.get("indices") and sparse_query.get("values") else {}),
             top_k=top_k,
             include_metadata=True,
+            _request_timeout=timeout,
             **({"filter": {"type": {"$eq": media_type}}} if media_type else {}),
         )
 
@@ -1398,7 +1413,8 @@ class HybridRagService:
             candidate_pool = max(candidate_pool, character_pool)
 
         namespaces = [name for name in self.config.pinecone_namespaces
-            if not self._local_only and self._namespace_backoff.get(name, 0) <= time.monotonic()]
+            if not self._local_only and self._namespace_backoff.get(name, 0) <= time.monotonic()
+            and remaining_seconds(1, reserve=1) > 0]
         limited = len(namespaces) < len(self.config.pinecone_namespaces)
         embed_ms = sparse_ms = 0
         dense_query, sparse_query = [], {"indices": [], "values": []}
@@ -1422,20 +1438,27 @@ class HybridRagService:
         collected: list[dict[str, Any]] = []
         pinecone_started = time.perf_counter()
         for namespace in namespaces:
-            try:
-                collected.extend(
-                    self._run_namespace_query(
-                        namespace=namespace,
-                        dense_query=dense_query,
-                        sparse_query=sparse_query,
-                        top_k=candidate_pool,
-                        media_type=media_type,
+            for attempt in range(2):
+                try:
+                    collected.extend(
+                        self._run_namespace_query(
+                            namespace=namespace,
+                            dense_query=dense_query,
+                            sparse_query=sparse_query,
+                            top_k=candidate_pool,
+                            media_type=media_type,
+                        )
                     )
-                )
-            except Exception as exc:  # noqa: BLE001
-                limited = True
-                self._namespace_backoff[namespace] = time.monotonic() + (300 if getattr(exc, "status", None) == 429 else 30)
-                LOGGER.warning("Namespace query failed for '%s': %s", namespace, exc)
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    transport_failure = getattr(exc, "status", None) == 0 or isinstance(exc, (OSError, UpstreamTransportError, httpx.TransportError))
+                    if attempt == 0 and transport_failure and remaining_seconds(5, reserve=1) >= .25:
+                        LOGGER.info("Retrying one transient namespace connection failure within the request budget.")
+                        continue
+                    limited = True
+                    self._namespace_backoff[namespace] = time.monotonic() + (300 if getattr(exc, "status", None) == 429 else 30)
+                    LOGGER.warning("Namespace query failed for '%s': %s", namespace, exc)
+                    break
         if limited:
             self._rerank_status.notice = "Search service is temporarily limited. Showing locally available matches; try an exact title for best results."
         pinecone_ms = _elapsed_ms(pinecone_started)
@@ -2038,6 +2061,11 @@ class HybridRagService:
 app = FastAPI(title="Manga RAG API", version="2.1.0")
 _service: HybridRagService | None = None
 _startup_error: str | None = None
+_startup_complete = False
+_search_capacity = max(1, min(4, _env_int("RAG_MAX_CONCURRENT_SEARCHES", 2)))
+_search_slots = threading.BoundedSemaphore(_search_capacity)
+_active_searches: dict[object, float] = {}
+_active_searches_lock = threading.Lock()
 
 
 def get_service() -> HybridRagService:
@@ -2048,23 +2076,34 @@ def get_service() -> HybridRagService:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+async def health() -> dict[str, str]:
     if _startup_error:
         return {"status": "error", "detail": _startup_error}
-    try:
-        get_service()
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "detail": str(exc)}
+    # A probe must never initialize models or queue behind search workers.
+    if _service is None or not _startup_complete:
+        return {"status": "starting", "initialized": "false"}
+    with _active_searches_lock:
+        starts = tuple(_active_searches.values())
+    stalled_after = max(60.0, _env_float("RAG_STALLED_SEARCH_SECONDS", 120))
+    if len(starts) >= _search_capacity and time.monotonic() - max(starts) >= stalled_after:
+        return {"status": "error", "detail": "Search workers exceeded the recovery deadline."}
     return {"status": "ok", "initialized": "true"}
 
 
 @app.on_event("startup")
 def warm_start_service() -> None:
-    global _startup_error
+    global _startup_error, _startup_complete
+    _startup_complete = False
     started = time.perf_counter()
     try:
-        get_service()
+        service = get_service()
+        # Load the lazy ONNX session and sparse-tokenizer data before accepting
+        # the first reader's request. No provider query or model API call.
+        if not service._local_only:
+            service._embeddings.embed_query("search readiness")
+            service._bm25.encode_queries("search readiness")
         _startup_error = None
+        _startup_complete = True
         elapsed_ms = _elapsed_ms(started)
         LOGGER.info("RAG service warm-start complete ms=%d.", elapsed_ms)
     except Exception as exc:  # noqa: BLE001
@@ -2078,10 +2117,24 @@ def rag_search(payload: RagSearchRequest) -> RagSearchResponse:
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty.")
 
+    service = _service
+    if service is None or _startup_error or not _startup_complete:
+        raise HTTPException(status_code=503, detail="Search is starting. Please try again shortly.", headers={"Retry-After": "2"})
+    # Bound memory-heavy searches on the 1 GB instance; health stays independent.
+    if not _search_slots.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="Search is busy. Please try again shortly.", headers={"Retry-After": "2"})
+    ticket = object()
+    with _active_searches_lock:
+        _active_searches[ticket] = time.monotonic()
     try:
-        return get_service().search(query, payload.media_type)
+        with request_budget(payload.budget_ms / 1000):
+            return service.search(query, payload.media_type)
     except Exception as exc:  # noqa: BLE001
         LOGGER.exception("RAG search failed.")
         raise HTTPException(
             status_code=500, detail=f"RAG search failed: {exc}"
         ) from exc
+    finally:
+        with _active_searches_lock:
+            _active_searches.pop(ticket, None)
+        _search_slots.release()

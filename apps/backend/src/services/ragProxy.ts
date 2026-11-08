@@ -541,6 +541,7 @@ function collectMalTitleCandidates(node: MalSearchNode): string[] {
 
 async function fetchMalTitleAliasCandidates(
   query: string,
+  deadlineAt: number,
 ): Promise<TitleAliasCandidate[]> {
   if (!looksLikeTitleSearch(query)) {
     return [];
@@ -566,6 +567,7 @@ async function fetchMalTitleAliasCandidates(
     query,
     cacheKey,
     clientId,
+    deadlineAt,
   );
   inFlightMalTitleAliasFetches.set(cacheKey, fetchPromise);
 
@@ -580,6 +582,7 @@ async function fetchMalTitleAliasCandidatesUncached(
   query: string,
   cacheKey: string,
   clientId: string,
+  deadlineAt: number,
 ): Promise<TitleAliasCandidate[]> {
   const mediaTypes = ["manga", "anime"] as const;
   const lookupQueries = buildMalTitleLookupQueries(query);
@@ -587,6 +590,8 @@ async function fetchMalTitleAliasCandidatesUncached(
 
   for (const lookupQuery of lookupQueries) {
     for (const mediaType of mediaTypes) {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 250) return [];
       try {
         const url = new URL(`${MAL_BASE_URL}/${mediaType}`);
         url.searchParams.set("q", lookupQuery);
@@ -599,7 +604,7 @@ async function fetchMalTitleAliasCandidatesUncached(
           continue;
         }
         const response = await fetch(url.toString(), {
-          signal: AbortSignal.timeout(MAL_TITLE_ALIAS_TIMEOUT_MS),
+          signal: AbortSignal.timeout(Math.min(MAL_TITLE_ALIAS_TIMEOUT_MS, remainingMs)),
           headers: {
             Accept: "application/json",
             "X-MAL-CLIENT-ID": clientId,
@@ -925,22 +930,37 @@ function extractCharactersFromSnippet(snippet: string): string[] {
   return characters;
 }
 
-async function callHybridRagService(query: string, mediaTypeFilter: JikanMediaType | null = null): Promise<RemoteRagPayload> {
+async function callHybridRagService(query: string, mediaTypeFilter: JikanMediaType | null, deadlineAt: number): Promise<RemoteRagPayload> {
   const raw = process.env.RAG_API_URL?.trim();
   const target = raw && raw.length > 0 ? raw : DEFAULT_RAG_API_URL;
+  const remainingMs = Math.max(1, deadlineAt - Date.now());
 
-  let response: Response;
   try {
-    response = await fetch(target, {
+    const response = await fetch(target, {
       method: "POST",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(remainingMs),
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({ query, media_type: mediaTypeFilter }),
+      body: JSON.stringify({ query, media_type: mediaTypeFilter, budget_ms: Math.max(100, Math.min(24000, remainingMs - 4000)) }),
     });
+    if (!response.ok) {
+      console.warn(`[rag] upstream status=${response.status}`);
+      await response.body?.cancel();
+      throw new IngestError(
+        "INGEST_FAILED",
+        response.status === 503
+          ? "Search is busy right now. Please try again shortly."
+          : "Search is temporarily unavailable. Please try again shortly.",
+        response.status === 503 ? 503 : 502,
+      );
+    }
+    return (await response.json()) as RemoteRagPayload;
   } catch (error) {
+    if (error instanceof IngestError) {
+      throw error;
+    }
     const base = error instanceof Error ? error.message : String(error);
     const cause =
       error && typeof error === "object" && "cause" in error
@@ -953,23 +973,16 @@ async function callHybridRagService(query: string, mediaTypeFilter: JikanMediaTy
           ? cause
           : "";
     const message = causeMessage ? `${base} (${causeMessage})` : base;
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    console.warn(`[rag] ${timedOut ? "timeout" : "request failed"}: ${message}`);
     throw new IngestError(
       "INGEST_FAILED",
-      `Smart Search backend is unavailable (${message}). Start the Python RAG service and retry.`,
-      502,
+      timedOut
+        ? "Search took too long. Please try again in a moment."
+        : "Search is temporarily unavailable. Please try again shortly.",
+      timedOut ? 504 : 503,
     );
   }
-
-  if (!response.ok) {
-    const rawBody = await response.text().catch(() => "");
-    throw new IngestError(
-      "INGEST_FAILED",
-      `Smart Search service failed (${response.status}). ${rawBody.slice(0, 180)}`,
-      502,
-    );
-  }
-
-  return (await response.json()) as RemoteRagPayload;
 }
 
 function toSourceLabel(): string {
@@ -1005,6 +1018,7 @@ function buildFallbackHighlight(
 async function searchMangaRagSingle(
   query: string,
   mediaTypeFilter: JikanMediaType | null = null,
+  deadlineAt = Date.now() + REQUEST_TIMEOUT_MS,
 ): Promise<RagSearchResponse> {
   const normalized = cleanText(query);
   if (!normalized) {
@@ -1031,6 +1045,7 @@ async function searchMangaRagSingle(
   const searchPromise = searchMangaRagSingleUncached(
     normalized,
     mediaTypeFilter,
+    deadlineAt,
   );
   inFlightRagSearches.set(cacheKey, searchPromise);
 
@@ -1046,8 +1061,9 @@ async function searchMangaRagSingle(
 async function searchMangaRagSingleUncached(
   normalized: string,
   mediaTypeFilter: JikanMediaType | null = null,
+  deadlineAt = Date.now() + REQUEST_TIMEOUT_MS,
 ): Promise<RagSearchResponse> {
-  const remote = await callHybridRagService(normalized, mediaTypeFilter);
+  const remote = await callHybridRagService(normalized, mediaTypeFilter, deadlineAt);
   const remoteAnswer = cleanText(remote.answer);
   const remoteResults = normalizeRemoteResults(remote).slice(0, DEFAULT_TOP_K);
   const enrichedResults: RagSearchResult[] = [];
@@ -1274,6 +1290,7 @@ export async function searchMangaRag(
   query: string,
   options: RagSearchOptions = {},
 ): Promise<RagSearchResponse> {
+  const deadlineAt = Date.now() + REQUEST_TIMEOUT_MS;
   const normalized = cleanText(query);
   if (!normalized) {
     return searchMangaRagSingle(query, options.mediaTypeFilter ?? null);
@@ -1286,7 +1303,7 @@ export async function searchMangaRag(
     ? parsedFilter.query
     : normalized;
   const primary = filterRagResponseByMediaType(
-    await searchMangaRagSingle(searchQuery, mediaTypeFilter),
+    await searchMangaRagSingle(searchQuery, mediaTypeFilter, deadlineAt),
     mediaTypeFilter,
     normalized,
   );
@@ -1309,7 +1326,7 @@ export async function searchMangaRag(
 
   const aliasSearches = buildTitleAliasSearches(
     searchQuery,
-    await fetchMalTitleAliasCandidates(searchQuery),
+    await fetchMalTitleAliasCandidates(searchQuery, deadlineAt),
   );
   if (aliasSearches.length > 0) {
     const entries: Array<{
@@ -1317,12 +1334,24 @@ export async function searchMangaRag(
       alias: TitleAliasCandidate | null;
     }> = [{ response: primary, alias: null }];
 
+    let aliasIncomplete = false;
     for (const aliasSearch of aliasSearches) {
-      const aliasResponse = filterRagResponseByMediaType(
-        await searchMangaRagSingle(aliasSearch.query, mediaTypeFilter),
-        mediaTypeFilter,
-        normalized,
-      );
+      if (deadlineAt - Date.now() <= 250) {
+        aliasIncomplete = true;
+        break;
+      }
+      let aliasResponse: RagSearchResponse;
+      try {
+        aliasResponse = filterRagResponseByMediaType(
+          await searchMangaRagSingle(aliasSearch.query, mediaTypeFilter, deadlineAt),
+          mediaTypeFilter,
+          normalized,
+        );
+      } catch (error) {
+        if (!entries.some((entry) => entry.response.results.length > 0)) throw error;
+        aliasIncomplete = true;
+        break;
+      }
       entries.push({ response: aliasResponse, alias: aliasSearch.alias });
 
       await options.onProgress?.({
@@ -1333,6 +1362,9 @@ export async function searchMangaRag(
     }
 
     const merged = mergeRagResponses(normalized, entries);
+    if (aliasIncomplete) {
+      merged.notice = "Showing available matches. Additional title matching is temporarily limited.";
+    }
     await options.onProgress?.({
       stage: "final",
       query: normalized,

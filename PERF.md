@@ -155,3 +155,60 @@ during outages are covered by isolated tests, not additional remote requests.
 The benchmark now records degraded search responses and fails its normal run
 when any occur, preventing a local-fallback workload from being mistaken for
 a successful remote-hybrid benchmark.
+
+## First-Attempt Reliability, 2026-11-08
+
+Production observation showed a 32.9-second backend timeout followed by a
+1.5-second retry. The watchdog was running every minute, with no intervening
+service restart. Substantial swapped-out RAG memory was present; that is a
+possible cold-path contributor, not a proven root cause for the whole delay.
+
+The first-attempt path now warms ONNX inference and sparse tokenization before
+readiness, bounds vector transport calls, and shares a 24-second allowance across
+retrieval/model work inside the existing 32-second backend deadline. One transient
+connection failure can be retried internally within that same allowance. Optional
+alias lookups share the backend's remaining time and cannot discard primary
+matches if their enhancement fails. Provider quota/outage fallbacks remain
+explicitly labeled; these changes do not create additional provider capacity.
+
+Title-candidate filtering uses a score upper bound to avoid full sequence matching
+when a title cannot reach the existing threshold. In a desktop cProfile run on
+the actual catalog, the time-travel description's title-filter stage fell from
+1.903s to 0.200s, with the same direct-title results. This is not end-to-end latency
+or a GCP measurement. More than 8,000 threshold comparisons check that accepted
+scores are preserved, including existing typo/romanization and containment rules.
+
+The checked-in cold-process probe ran real local embedding, sparse encoding,
+catalog and HTTP backend code under the shared 768 MiB / 0.25-core Windows Job
+limit. Pinecone and Groq responses were simulated; model files were cached before
+startup, response caches were not hit, and the vector fixture injected one stale
+initial connection. These fixture results are not an accuracy evaluation or a
+live-provider/production latency claim.
+
+| Observation | Result |
+| --- | --- |
+| First uncached time-travel description | 656 ms, HTTP 200 |
+| Three other distinct uncached descriptions | 2,015-2,016 ms, HTTP 200 |
+| Combined peak committed memory | 541.3 MiB |
+| RAG startup including inference warmup | 79.7 s |
+| Backend startup | 3.9 s |
+| Empty/degraded responses or service exits | 0 |
+
+Separate tests cover first-attempt results during model throttling, exhausted
+budgets, real loopback socket stalls in the pinned SDK, startup gating, and
+preservation of primary results after optional alias timeouts. Earlier local
+probe attempts encountered an empty model cache and an inaccessible stale cache;
+those failed before the workload and are excluded from the table. Benchmark
+readiness now rejects HTTP-200 startup-error bodies instead of treating a missing
+`initialized` field as success.
+
+Reproduce after building, with the embedding model already present in the chosen
+local cache (the probe itself is offline):
+
+```sh
+python scripts/bench/first-request.py --model-cache .tmp/first-request-model-cache
+```
+
+Real GCP cold-after-idle behavior and external-provider timings still need to be
+checked after deployment. No production services, VM sizing or kernel settings
+were changed by this validation.
